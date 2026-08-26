@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>Cadastrar empresa</title>
+
+    <!-- SDK OFICIAL DO PIPEDRIVE -->
+    <script
+        src="https://cdn.jsdelivr.net/npm/@pipedrive/app-extensions-sdk@0/dist/index.umd.js">
+    </script>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 30px;
+
+            font-family:
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                Arial,
+                sans-serif;
+
+            background: #ffffff;
+            color: #252525;
+        }
+
+        .container {
+            max-width: 620px;
+            margin: auto;
+        }
+
+        h2 {
+            margin-top: 0;
+        }
+
+        .subtitulo {
+            color: #666;
+            margin-bottom: 30px;
+        }
+
+        .campo {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+
+            font-weight: 600;
+
+            margin-bottom: 7px;
+        }
+
+        input {
+            width: 100%;
+            height: 44px;
+
+            padding: 0 12px;
+
+            border: 1px solid #c7c7c7;
+            border-radius: 6px;
+
+            font-size: 16px;
+        }
+
+        input:focus {
+            outline: none;
+
+            border-color: #317ae2;
+        }
+
+        .mensagem {
+            margin-top: 7px;
+
+            font-size: 14px;
+
+            min-height: 20px;
+        }
+
+        .sucesso {
+            color: #18864b;
+        }
+
+        .erro {
+            color: #c92a2a;
+        }
+
+        .deal {
+            padding: 12px;
+
+            margin-bottom: 20px;
+
+            background: #f6f6f6;
+
+            border-radius: 6px;
+
+            font-size: 13px;
+        }
+
+        .acoes {
+            display: flex;
+            justify-content: flex-end;
+
+            margin-top: 30px;
+        }
+
+        button {
+            height: 42px;
+
+            padding: 0 20px;
+
+            border: 0;
+            border-radius: 6px;
+
+            background: #28a745;
+            color: #ffffff;
+
+            font-size: 14px;
+            font-weight: 600;
+
+            cursor: pointer;
+        }
+
+        button:disabled {
+            background: #bdbdbd;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+
+
+<body>
+
+<div class="container">
+
+    <h2>
+        Cadastrar / Vincular empresa
+    </h2>
+
+    <div class="subtitulo">
+        Informe o CNPJ da empresa.
+    </div>
+
+
+    <div
+        id="dealInfo"
+        class="deal"
+        style="display:none;">
+    </div>
+
+
+    <div class="campo">
+
+        <label for="cnpj">
+            CNPJ *
+        </label>
+
+        <input
+            type="text"
+            id="cnpj"
+            maxlength="18"
+            placeholder="00.000.000/0000-00"
+            autocomplete="off"
+        >
+
+        <div
+            id="msgCnpj"
+            class="mensagem">
+        </div>
+
+    </div>
+
+
+    <div class="acoes">
+
+        <button
+            type="button"
+            id="btnContinuar"
+            disabled>
+            Continuar
+        </button>
+
+    </div>
+
+</div>
+
+
+<script>
+
+    let sdk = null;
+
+
+    /*
+        INICIALIZA O SDK DO PIPEDRIVE
+    */
+    async function iniciarPipedrive() {
+
+        try {
+
+            sdk =
+                await new AppExtensionsSDK()
+                    .initialize({
+                        size: {
+                            width: 650,
+                            height: 420
+                        }
+                    });
+
+
+            console.log(
+                'SDK Pipedrive inicializado.'
+            );
+
+
+            carregarContextoDeal();
+
+        }
+        catch (erro) {
+
+            console.error(
+                'Erro ao inicializar Pipedrive:',
+                erro
+            );
+
+        }
+
+    }
+
+
+    /*
+        PEGA O DEAL ENVIADO
+        PELO PIPEDRIVE
+    */
+    function carregarContextoDeal() {
+
+        const params =
+            new URLSearchParams(
+                window.location.search
+            );
+
+
+        const resource =
+            params.get('resource');
+
+        const view =
+            params.get('view');
+
+        const selectedIds =
+            params.get('selectedIds');
+
+
+        console.log({
+            resource,
+            view,
+            selectedIds
+        });
+
+
+        if (selectedIds) {
+
+            const box =
+                document.getElementById(
+                    'dealInfo'
+                );
+
+
+            box.style.display =
+                'block';
+
+
+            box.innerHTML =
+                '<strong>Negócio atual:</strong> '
+                +
+                selectedIds;
+
+        }
+
+    }
+
+
+    /*
+        SOMENTE NÚMEROS
+    */
+    function somenteNumeros(valor) {
+
+        return valor.replace(
+            /\D/g,
+            ''
+        );
+
+    }
+
+
+    /*
+        MÁSCARA DE CNPJ
+    */
+    function mascararCnpj(valor) {
+
+        valor =
+            somenteNumeros(valor)
+                .substring(0, 14);
+
+
+        valor =
+            valor.replace(
+                /^(\d{2})(\d)/,
+                '$1.$2'
+            );
+
+
+        valor =
+            valor.replace(
+                /^(\d{2})\.(\d{3})(\d)/,
+                '$1.$2.$3'
+            );
+
+
+        valor =
+            valor.replace(
+                /\.(\d{3})(\d)/,
+                '.$1/$2'
+            );
+
+
+        valor =
+            valor.replace(
+                /(\d{4})(\d)/,
+                '$1-$2'
+            );
+
+
+        return valor;
+
+    }
+
+
+    /*
+        VALIDAÇÃO MATEMÁTICA CNPJ
+    */
+    function validarCnpj(valor) {
+
+        const cnpj =
+            somenteNumeros(valor);
+
+
+        if (cnpj.length !== 14) {
+
+            return false;
+
+        }
+
+
+        /*
+            Evita:
+            00000000000000
+            11111111111111
+            etc.
+        */
+        if (/^(\d)\1{13}$/.test(cnpj)) {
+
+            return false;
+
+        }
+
+
+        function calcularDigito(
+            base,
+            pesos
+        ) {
+
+            let soma = 0;
+
+
+            for (
+                let i = 0;
+                i < pesos.length;
+                i++
+            ) {
+
+                soma +=
+                    Number(base[i])
+                    *
+                    pesos[i];
+
+            }
+
+
+            const resto =
+                soma % 11;
+
+
+            return resto < 2
+                ? 0
+                : 11 - resto;
+
+        }
+
+
+        const digito1 =
+            calcularDigito(
+                cnpj.substring(
+                    0,
+                    12
+                ),
+                [
+                    5,4,3,2,
+                    9,8,7,6,
+                    5,4,3,2
+                ]
+            );
+
+
+        if (
+            digito1 !==
+            Number(cnpj[12])
+        ) {
+
+            return false;
+
+        }
+
+
+        const digito2 =
+            calcularDigito(
+                cnpj.substring(
+                    0,
+                    13
+                ),
+                [
+                    6,5,4,3,2,
+                    9,8,7,6,
+                    5,4,3,2
+                ]
+            );
+
+
+        return (
+            digito2 ===
+            Number(cnpj[13])
+        );
+
+    }
+
+
+    const inputCnpj =
+        document.getElementById(
+            'cnpj'
+        );
+
+
+    const mensagem =
+        document.getElementById(
+            'msgCnpj'
+        );
+
+
+    const btnContinuar =
+        document.getElementById(
+            'btnContinuar'
+        );
+
+
+    /*
+        DIGITAÇÃO
+    */
+    inputCnpj.addEventListener(
+        'input',
+        function () {
+
+            inputCnpj.value =
+                mascararCnpj(
+                    inputCnpj.value
+                );
+
+
+            mensagem.innerHTML = '';
+
+            mensagem.className =
+                'mensagem';
+
+
+            btnContinuar.disabled =
+                true;
+
+        }
+    );
+
+
+    /*
+        SAIU DO CAMPO CNPJ
+    */
+    inputCnpj.addEventListener(
+        'blur',
+        function () {
+
+            const cnpj =
+                somenteNumeros(
+                    inputCnpj.value
+                );
+
+
+            if (!cnpj) {
+
+                mensagem.innerHTML = '';
+
+                return;
+
+            }
+
+
+            if (!validarCnpj(cnpj)) {
+
+                mensagem.innerHTML =
+                    '✕ CNPJ inválido';
+
+                mensagem.className =
+                    'mensagem erro';
+
+
+                btnContinuar.disabled =
+                    true;
+
+
+                return;
+
+            }
+
+
+            mensagem.innerHTML =
+                '✓ CNPJ válido';
+
+            mensagem.className =
+                'mensagem sucesso';
+
+
+            btnContinuar.disabled =
+                false;
+
+        }
+    );
+
+
+    /*
+        MVP
+
+        Na próxima etapa este botão
+        consultará o Pipedrive.
+    */
+    btnContinuar.addEventListener(
+        'click',
+        function () {
+
+            const cnpj =
+                somenteNumeros(
+                    inputCnpj.value
+                );
+
+
+            alert(
+                'CNPJ válido: '
+                +
+                cnpj
+                +
+                '\n\n'
+                +
+                'Próxima etapa: consultar duplicidade.'
+            );
+
+        }
+    );
+
+
+    iniciarPipedrive();
+
+</script>
+
+</body>
+
+</html>
