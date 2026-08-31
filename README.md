@@ -1,49 +1,34 @@
-# Pipedrive CNPJ MVP v5
+# Pipedrive CNPJ MVP v6.0.0
 
-A v5 muda o fluxo principal: **o cliente é preparado antes do Deal existir**.
+Esta versão corrige os pontos encontrados nos testes da janela flutuante.
 
-## Fluxo novo
+## O que mudou
 
-1. Usuário abre a janela flutuante **Cadastrar cliente** no Pipedrive.
-2. Informa o CNPJ.
-3. O backend procura o CNPJ no Pipedrive.
-4. Se a Organização já existir:
-   - usuário seleciona a Organização;
-   - o app lista Pessoas já vinculadas à Organização;
-   - usuário pode selecionar uma Pessoa existente ou criar um novo contato.
-5. Se a Organização não existir:
-   - consulta BrasilAPI;
-   - valida situação cadastral;
-   - preenche dados cadastrais;
-   - cria Organização e Pessoa.
-6. Com Organização + Pessoa prontas, o botão **Abrir novo negócio** abre o modal nativo do Pipedrive.
-7. O modal nativo recebe pré-preenchimento de Título, Organização e Pessoa.
-8. Depois que o Deal é salvo, o app redireciona para o negócio criado.
+- A janela flutuante sempre abre limpa ao ser exibida novamente.
+- A data da situação cadastral é mostrada ao usuário em `DD/MM/AAAA`.
+- O valor salvo no campo **Data Situação Cadastral** continua em `AAAA-MM-DD`, que é o formato exigido pelo Pipedrive.
+- Os dados da BrasilAPI são armazenados em cache no Postgres por 24 horas para que a criação da Organização use exatamente os dados que acabaram de ser consultados, evitando uma segunda consulta externa e perda dos dados por rate limit/indisponibilidade.
+- O mapeamento de campos personalizados aceita `field_code`, `key` ou `code` retornados pela API de campos do Pipedrive.
+- Foi incluída a ação **Atualizar dados cadastrais** para Organização já existente. Isso é útil para corrigir cadastros criados durante os testes anteriores.
+- O modal nativo **Adicionar negócio** não é mais usado. O SDK do Pipedrive só permite `CLOSE_MODAL` para modais personalizados, então não existe uma forma segura de fechar programaticamente o modal nativo após o primeiro Salvar.
+- O negócio agora é criado diretamente via `POST /api/v2/deals`.
+- A criação do negócio possui uma chave idempotente no Postgres. Repetir a mesma requisição não cria outro Deal.
+- Para empresa nova, o botão **Criar cliente e negócio** cria Organização, Pessoa e Deal em sequência.
+- Para empresa já existente, selecione/crie o contato e use **Criar negócio**.
+- Após criar o Deal, a janela flutuante é ocultada e o usuário é direcionado ao negócio criado.
 
-## Extensão a criar no Developer Hub
+## Campos personalizados da Organização esperados
 
-Em **App extensions**, adicione uma **Janela flutuante personalizada**:
+- CNPJ
+- Nome Fantasia
+- Situação Cadastral
+- Data Situação Cadastral
+- CNAE Principal
+- Descrição CNAE Principal
+- Natureza Jurídica
+- Quadro Societário (QSA)
 
-- Nome: `Cadastrar cliente`
-- Descrição: `Valide o CNPJ, selecione ou crie a empresa e o contato antes de abrir um novo negócio.`
-- URL de iframe: `https://SEU-SERVICO.onrender.com/floating`
-- Chave JWT: deixe vazia se quiser usar o Client Secret como padrão
-- Ponto de entrada: **Top bar / Apps dock**
-
-A Custom Modal antiga em `/modal` pode continuar instalada durante os testes; a v5 não a remove.
-
-## Campos personalizados esperados na Organização
-
-- `CNPJ` — Texto
-- `Nome Fantasia` — Texto
-- `Situação Cadastral` — Opção única
-- `Data Situação Cadastral` — Data
-- `CNAE Principal` — Texto ou Texto longo
-- `Descrição CNAE Principal` — Texto longo
-- `Natureza Jurídica` — Texto longo
-- `Quadro Societário (QSA)` — Texto longo
-
-Opções sugeridas em `Situação Cadastral`:
+`Situação Cadastral` deve ser uma opção única contendo, conforme aplicável:
 
 - ATIVA
 - BAIXADA
@@ -51,54 +36,31 @@ Opções sugeridas em `Situação Cadastral`:
 - SUSPENSA
 - NULA
 
-## Endpoints novos da v5
-
-- `GET /floating` — interface da janela flutuante
-- `POST /api/persons-by-organization` — lista contatos de uma Organização
-- `POST /api/create-contact-existing` — cria contato para Organização existente
-- `POST /api/create-client` — cria Organização + Pessoa, sem Deal
-
-Os endpoints da v4 continuam disponíveis para o modal legado.
-
-## Observação sobre o modal nativo de Deal
-
-O SDK atual do Pipedrive permite pré-preencher o novo Deal com **nomes** de Organização e Pessoa (`prefill.organization` e `prefill.person`), não com IDs. Para o MVP isso é útil, mas confirme visualmente os dois campos no modal nativo antes de salvar, principalmente se houver nomes idênticos no CRM.
-
 ## Atualização no Render
 
-Substitua no GitHub:
+Substitua no repositório principalmente:
 
 - `server.js`
-- `public/floating.html`
-- `public/modal.html` (pode manter o da v4)
 - `package.json`
+- `public/floating.html`
 - `README.md`
 
-Depois no Render:
+Depois faça `Manual Deploy -> Deploy latest commit`.
 
-`Manual Deploy -> Deploy latest commit`
+Confirme:
 
-Teste:
-
-`https://SEU-SERVICO.onrender.com/health`
+```text
+https://pipedrive-cnpj.onrender.com/health
+```
 
 O retorno deve conter:
 
-`"version":"5.2.0"`
+```json
+"version": "6.0.0"
+```
 
-Não é necessário mudar OAuth callback, banco ou variáveis já existentes.
+Não é necessário alterar a URL da janela flutuante no Developer Hub:
 
-
-## Correção v5.1
-
-Corrige o estado dos botões durante chamadas assíncronas aninhadas na janela flutuante. Em alguns fluxos com organização/contato já existentes, o botão **Abrir novo negócio** permanecia desabilitado mesmo após o cliente estar pronto.
-
-
-## Correção v5.2
-
-- Impede múltiplos cliques em **Abrir novo negócio** enquanto o modal nativo do Pipedrive já está aberto.
-- Depois que o SDK retorna `status=submitted` e o ID do Deal, mantém o botão bloqueado, mostra o ID criado, redireciona para o Deal e oculta a janela flutuante.
-- Se o usuário fechar o modal nativo sem salvar, o botão é liberado novamente.
-- A consulta à BrasilAPI envia `User-Agent` e transforma erros estruturados em texto legível, evitando `[object Object]`.
-
-Observação: o SDK do Pipedrive não oferece um comando para fechar programaticamente o modal **nativo** de Deal; `CLOSE_MODAL` se aplica apenas a custom modals. Por isso a proteção é feita evitando abertura duplicada e reagindo ao retorno `submitted` do próprio modal nativo.
+```text
+https://pipedrive-cnpj.onrender.com/floating
+```

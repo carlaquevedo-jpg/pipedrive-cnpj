@@ -1,8 +1,8 @@
 {
   "name": "pipedrive-cnpj-mvp",
-  "version": "5.2.0",
+  "version": "6.0.0",
   "private": true,
-  "description": "MVP de cadastro de cliente por CNPJ antes da criação do Deal no Pipedrive",
+  "description": "Cadastro de cliente por CNPJ com BrasilAPI e criação idempotente de Deal no Pipedrive",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

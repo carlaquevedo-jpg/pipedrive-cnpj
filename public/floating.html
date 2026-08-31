@@ -6,43 +6,14 @@
   <title>Cadastrar cliente</title>
   <script src="https://cdn.jsdelivr.net/npm/@pipedrive/app-extensions-sdk@0/dist/index.umd.js"></script>
   <style>
-    :root {
-      color-scheme: light;
-      --bg:#fff; --card:#f7f8fa; --text:#22252a; --muted:#6b7280; --border:#d6dae0;
-      --primary:#1f7a4d; --primary-hover:#17623d; --danger:#b42318; --success:#137a45;
-      --warning:#8a5b00; --warning-bg:#fff7e6; --warning-border:#f2c46d;
-      --info-bg:#eef6ff; --info-border:#bad8ff;
-    }
-    *{box-sizing:border-box}
-    body{margin:0;padding:18px;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;background:var(--bg);color:var(--text)}
-    .wrap{max-width:740px;margin:0 auto}
-    h1{font-size:21px;margin:0 0 4px} h2{font-size:15px;margin:0 0 12px}
-    .sub{font-size:13px;color:var(--muted);margin-bottom:16px}
-    .section{border-top:1px solid var(--border);padding-top:14px;margin-top:14px}
-    .grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}.full{grid-column:1/-1}
-    label{display:block;font-size:13px;font-weight:650;margin-bottom:5px}
-    input{width:100%;height:39px;border:1px solid var(--border);border-radius:7px;padding:0 10px;font-size:14px;background:#fff;color:var(--text)}
-    input:focus{outline:2px solid #2f80ed33;border-color:#2f80ed}
-    .hint{font-size:11px;color:var(--muted);margin-top:5px}.message{min-height:18px;font-size:12px;margin-top:7px;white-space:pre-wrap}
-    .error{color:var(--danger)}.success{color:var(--success)}.warning-text{color:var(--warning);font-size:11px;margin-top:7px}
-    .card{display:none;border:1px solid var(--border);border-radius:9px;padding:13px;margin-top:14px}.card.warning{background:var(--warning-bg);border-color:var(--warning-border)}.card.info{background:var(--info-bg);border-color:var(--info-border)}
-    .choice{display:flex;gap:9px;align-items:flex-start;padding:9px;border:1px solid var(--border);border-radius:8px;background:#fff;margin-top:8px;cursor:pointer}.choice:hover{border-color:#9ab8dd}.choice input{width:auto;height:auto;margin-top:3px}
-    .choice-title{font-weight:700;font-size:13px}.choice-meta{color:var(--muted);font-size:11px;margin-top:3px}
-    .badge{display:inline-flex;border-radius:999px;padding:3px 8px;font-size:11px;font-weight:700;background:#eceff3}.badge.active{background:#e8f7ee;color:#137a45}.badge.blocked{background:#fdecec;color:#b42318}
-    .registry-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px 14px;margin-top:10px;font-size:12px}.registry-label{font-size:10px;color:var(--muted);text-transform:uppercase}.registry-value{font-weight:600;margin-top:2px}
-    details{margin-top:9px;font-size:12px}summary{cursor:pointer;font-weight:650}.qsa{white-space:pre-wrap;padding:8px;background:#fff;border:1px solid var(--border);border-radius:7px;margin-top:7px;max-height:100px;overflow:auto}
-    .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;flex-wrap:wrap}
-    button{min-height:38px;border:1px solid transparent;border-radius:7px;padding:0 14px;font-weight:650;cursor:pointer;font-size:13px}button.primary{background:var(--primary);color:#fff}button.primary:hover{background:var(--primary-hover)}button.secondary{background:#fff;color:var(--text);border-color:var(--border)}button:disabled{opacity:.55;cursor:not-allowed}
-    .divider{display:flex;align-items:center;gap:9px;color:var(--muted);font-size:11px;margin:13px 0}.divider:before,.divider:after{content:"";height:1px;background:var(--border);flex:1}
-    .ready{background:#edf9f1;border-color:#b9dfc7}.ready-line{font-size:13px;margin-top:5px}.ready-line strong{display:inline-block;min-width:95px}
-    .busy{display:none;font-size:12px;color:var(--muted);margin-top:8px}
-    @media(max-width:620px){body{padding:13px}.grid,.registry-grid{grid-template-columns:1fr}.full{grid-column:auto}}
+    :root{color-scheme:light;--bg:#fff;--card:#f7f8fa;--text:#22252a;--muted:#6b7280;--border:#d6dae0;--primary:#1f7a4d;--primary-hover:#17623d;--danger:#b42318;--success:#137a45;--warning:#8a5b00;--warning-bg:#fff7e6;--warning-border:#f2c46d;--info-bg:#eef6ff;--info-border:#bad8ff}
+    *{box-sizing:border-box}body{margin:0;padding:18px;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;background:var(--bg);color:var(--text)}.wrap{max-width:740px;margin:0 auto}h1{font-size:21px;margin:0 0 4px}h2{font-size:15px;margin:0 0 12px}.sub{font-size:13px;color:var(--muted);margin-bottom:16px}.section{border-top:1px solid var(--border);padding-top:14px;margin-top:14px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}.full{grid-column:1/-1}label{display:block;font-size:13px;font-weight:650;margin-bottom:5px}input{width:100%;height:39px;border:1px solid var(--border);border-radius:7px;padding:0 10px;font-size:14px;background:#fff;color:var(--text)}input:focus{outline:2px solid #2f80ed33;border-color:#2f80ed}.hint{font-size:11px;color:var(--muted);margin-top:5px}.message{min-height:18px;font-size:12px;margin-top:7px;white-space:pre-wrap}.error{color:var(--danger)}.success{color:var(--success)}.warning-text{color:var(--warning);font-size:11px;margin-top:7px}.card{display:none;border:1px solid var(--border);border-radius:9px;padding:13px;margin-top:14px}.card.warning{background:var(--warning-bg);border-color:var(--warning-border)}.card.info{background:var(--info-bg);border-color:var(--info-border)}.choice{display:flex;gap:9px;align-items:flex-start;padding:9px;border:1px solid var(--border);border-radius:8px;background:#fff;margin-top:8px;cursor:pointer}.choice:hover{border-color:#9ab8dd}.choice input{width:auto;height:auto;margin-top:3px}.choice-title{font-weight:700;font-size:13px}.choice-meta{color:var(--muted);font-size:11px;margin-top:3px}.badge{display:inline-flex;border-radius:999px;padding:3px 8px;font-size:11px;font-weight:700;background:#eceff3}.badge.active{background:#e8f7ee;color:#137a45}.badge.blocked{background:#fdecec;color:#b42318}.registry-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px 14px;margin-top:10px;font-size:12px}.registry-label{font-size:10px;color:var(--muted);text-transform:uppercase}.registry-value{font-weight:600;margin-top:2px}details{margin-top:9px;font-size:12px}summary{cursor:pointer;font-weight:650}.qsa{white-space:pre-wrap;padding:8px;background:#fff;border:1px solid var(--border);border-radius:7px;margin-top:7px;max-height:100px;overflow:auto}.actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;flex-wrap:wrap}button{min-height:38px;border:1px solid transparent;border-radius:7px;padding:0 14px;font-weight:650;cursor:pointer;font-size:13px}button.primary{background:var(--primary);color:#fff}button.primary:hover{background:var(--primary-hover)}button.secondary{background:#fff;color:var(--text);border-color:var(--border)}button:disabled{opacity:.55;cursor:not-allowed}.divider{display:flex;align-items:center;gap:9px;color:var(--muted);font-size:11px;margin:13px 0}.divider:before,.divider:after{content:"";height:1px;background:var(--border);flex:1}.ready{background:#edf9f1;border-color:#b9dfc7}.ready-line{font-size:13px;margin-top:5px}.ready-line strong{display:inline-block;min-width:95px}.busy{display:none;font-size:12px;color:var(--muted);margin-top:8px}@media(max-width:620px){body{padding:13px}.grid,.registry-grid{grid-template-columns:1fr}.full{grid-column:auto}}
   </style>
 </head>
 <body>
 <div class="wrap">
   <h1>Cadastrar cliente</h1>
-  <div class="sub">Valide a empresa e o contato antes de abrir o cadastro nativo do negócio.</div>
+  <div class="sub">Valide CNPJ, empresa e contato. O negócio é criado diretamente pela integração, sem abrir o modal nativo.</div>
 
   <div class="field">
     <label for="cnpj">CNPJ *</label>
@@ -50,13 +21,14 @@
     <div class="hint">Primeiro procuramos no Pipedrive. Se não existir, consultamos a BrasilAPI.</div>
     <div id="message" class="message"></div>
   </div>
-  <div class="actions" id="checkActions"><button id="btnCheck" class="primary">Consultar CNPJ</button></div>
+  <div class="actions"><button id="btnCheck" class="primary">Consultar CNPJ</button></div>
   <div id="busy" class="busy"></div>
 
   <div id="existingCard" class="card warning">
     <strong>⚠ Empresa já cadastrada no Pipedrive</strong>
     <div class="hint">Selecione a organização correta. Se aparecer mais de uma, já há duplicidade histórica desse CNPJ.</div>
     <div id="existingList"></div>
+    <div class="actions"><button id="btnSyncOrg" class="secondary" disabled>Atualizar dados cadastrais</button></div>
   </div>
 
   <div id="contactCard" class="card">
@@ -67,7 +39,7 @@
       <div class="actions"><button id="btnUsePerson" class="primary" disabled>Usar contato selecionado</button></div>
       <div class="divider">ou</div>
     </div>
-    <div id="newContactWrap">
+    <div>
       <div class="hint" style="margin-bottom:9px">Criar um novo contato vinculado à organização:</div>
       <div class="grid">
         <div class="full"><label for="existingContactName">Nome *</label><input id="existingContactName" /></div>
@@ -119,239 +91,104 @@
         <div><label for="email">E-mail *</label><input id="email" type="email" /></div>
       </div>
     </div>
-    <div class="actions"><button id="btnCreateClient" class="primary">Criar cliente</button></div>
+    <div class="section">
+      <h2>Negócio</h2>
+      <div class="grid">
+        <div class="full"><label for="newDealTitle">Título *</label><input id="newDealTitle" /></div>
+        <div><label for="newDealValue">Valor</label><input id="newDealValue" inputmode="decimal" placeholder="0,00" /></div>
+        <div><label for="newDealCurrency">Moeda</label><input id="newDealCurrency" value="BRL" maxlength="3" /></div>
+      </div>
+    </div>
+    <div class="actions"><button id="btnCreateClient" class="primary">Criar cliente e negócio</button></div>
   </div>
 
   <div id="readyCard" class="card ready">
-    <strong>✓ Cliente pronto para criar o negócio</strong>
+    <strong>✓ Cliente pronto</strong>
     <div class="ready-line"><strong>Organização:</strong> <span id="readyOrg"></span></div>
     <div class="ready-line"><strong>Contato:</strong> <span id="readyPerson"></span></div>
-    <div class="actions"><button id="btnOpenDeal" class="primary">Abrir novo negócio</button></div>
-    <div class="hint">O Pipedrive abrirá o formulário nativo de negócio com Organização e Pessoa pré-preenchidas.</div>
+    <div class="section">
+      <h2>Negócio</h2>
+      <div class="grid">
+        <div class="full"><label for="dealTitle">Título *</label><input id="dealTitle" /></div>
+        <div><label for="dealValue">Valor</label><input id="dealValue" inputmode="decimal" placeholder="0,00" /></div>
+        <div><label for="dealCurrency">Moeda</label><input id="dealCurrency" value="BRL" maxlength="3" /></div>
+      </div>
+    </div>
+    <div class="actions"><button id="btnCreateDeal" class="primary">Criar negócio</button></div>
+    <div class="hint">O negócio é criado uma única vez pela API e depois abrimos o registro criado.</div>
   </div>
 </div>
 <script>
-  const el = (id) => document.getElementById(id);
-  const params = new URLSearchParams(window.location.search);
-  const companyId = params.get('companyId') || params.get('company_id') || '';
-  const initialToken = params.get('token') || '';
+  const el=id=>document.getElementById(id);
+  const params=new URLSearchParams(window.location.search);
+  const companyId=params.get('companyId')||params.get('company_id')||'';
+  const initialToken=params.get('token')||'';
 
-  let sdk = null;
-  let lastCnpj = '';
-  let registryAllowsCreation = false;
-  let existingOrganizations = [];
-  let selectedOrganization = null;
-  let existingPersons = [];
-  let selectedPerson = null;
-  let readyOrganization = null;
-  let readyPerson = null;
-  let dealModalOpen = false;
-  let createdDealId = null;
+  let sdk=null,lastCnpj='',registryAllowsCreation=false,existingOrganizations=[],selectedOrganization=null,existingPersons=[],selectedPerson=null,readyOrganization=null,readyPerson=null,createdDealId=null,busyDepth=0,dealRequestId='';
 
+  function newRequestId(){return (globalThis.crypto?.randomUUID?.()||('req-'+Date.now()+'-'+Math.random().toString(36).slice(2)))}
   function normalizeCnpj(value){return String(value||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,14)}
   function formatCnpj(value){const v=normalizeCnpj(value);if(v.length<3)return v;let out=v.slice(0,2);if(v.length>2)out+='.'+v.slice(2,5);if(v.length>5)out+='.'+v.slice(5,8);if(v.length>8)out+='/'+v.slice(8,12);if(v.length>12)out+='-'+v.slice(12,14);return out}
   function formatCep(value){const v=String(value||'').replace(/\D/g,'').slice(0,8);return v.length>5?v.slice(0,5)+'-'+v.slice(5):v}
+  function formatDateBr(value){const m=String(value||'').match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?`${m[3]}/${m[2]}/${m[1]}`:String(value||'')}
   function escapeHtml(value){return String(value||'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;')}
   function setMessage(text='',type=''){el('message').textContent=text;el('message').className='message '+type}
-  let busyDepth = 0;
+
   function setBusy(on,text='Processando...'){
-    if(on){
-      busyDepth++;
-      el('busy').style.display='block';
-      el('busy').textContent=text;
-      // Salva o estado original somente na primeira operação ocupada.
-      // Isso evita que chamadas assíncronas aninhadas gravem um botão já
-      // desabilitado como se esse fosse o estado original.
-      if(busyDepth===1){
-        document.querySelectorAll('button').forEach(b=>{
-          b.dataset.preBusyDisabled=b.disabled?'1':'0';
-          b.disabled=true;
-        });
-      }
-      return;
-    }
-
-    busyDepth=Math.max(0,busyDepth-1);
-    if(busyDepth>0)return;
-
-    el('busy').style.display='none';
-    el('busy').textContent='';
-    document.querySelectorAll('button').forEach(b=>{
-      if(b.dataset.preBusyDisabled!=null){
-        b.disabled=b.dataset.preBusyDisabled==='1';
-        delete b.dataset.preBusyDisabled;
-      }
-    });
+    if(on){busyDepth++;el('busy').style.display='block';el('busy').textContent=text;if(busyDepth===1)document.querySelectorAll('button').forEach(b=>{b.dataset.preBusyDisabled=b.disabled?'1':'0';b.disabled=true});return}
+    busyDepth=Math.max(0,busyDepth-1);if(busyDepth>0)return;el('busy').style.display='none';el('busy').textContent='';document.querySelectorAll('button').forEach(b=>{if(b.dataset.preBusyDisabled!=null){b.disabled=b.dataset.preBusyDisabled==='1';delete b.dataset.preBusyDisabled}})
   }
-  function resetPanels(){
+
+  function clearInputs(){
+    ['cnpj','existingContactName','existingPhone','existingEmail','legalName','tradeName','postalCode','state','city','addressLine','contactName','phone','email','newDealTitle','newDealValue','dealTitle','dealValue'].forEach(id=>{const n=el(id);if(n)n.value=''});
+    el('newDealCurrency').value='BRL';el('dealCurrency').value='BRL';
+  }
+
+  function resetAll(){
+    busyDepth=0;el('busy').style.display='none';el('busy').textContent='';
     ['existingCard','contactCard','registryCard','registryUnavailableCard','newCard','readyCard'].forEach(id=>el(id).style.display='none');
-    selectedOrganization=null;selectedPerson=null;readyOrganization=null;readyPerson=null;existingOrganizations=[];existingPersons=[];registryAllowsCreation=false;
-    dealModalOpen=false;createdDealId=null;
-    const b=el('btnOpenDeal');
-    if(b){b.disabled=true;b.textContent=b.dataset.originalText||'Abrir novo negócio'}
+    el('existingList').innerHTML='';el('personList').innerHTML='';el('personListWrap').style.display='none';el('qsaDetails').style.display='none';
+    selectedOrganization=null;selectedPerson=null;readyOrganization=null;readyPerson=null;existingOrganizations=[];existingPersons=[];registryAllowsCreation=false;lastCnpj='';createdDealId=null;dealRequestId=newRequestId();
+    clearInputs();setMessage('');el('btnUsePerson').disabled=true;el('btnSyncOrg').disabled=true;document.querySelectorAll('button').forEach(b=>{delete b.dataset.preBusyDisabled});el('btnCheck').disabled=false;
   }
 
-  async function getFreshToken(){
-    if(sdk){
-      try{const r=await sdk.execute(AppExtensionsSDK.Command.GET_SIGNED_TOKEN);if(r?.token)return r.token}catch(_){ }
-    }
-    return initialToken;
-  }
-  async function api(url,body){
-    const token=await getFreshToken();
-    const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','x-pipedrive-token':token},body:JSON.stringify({...body,token})});
-    const json=await response.json().catch(()=>({ok:false,error:'Resposta inválida do servidor.'}));
-    if(!response.ok||json.ok===false){const e=new Error(json.error||`HTTP ${response.status}`);e.payload=json;throw e}return json;
-  }
+  async function getFreshToken(){if(sdk){try{const r=await sdk.execute(AppExtensionsSDK.Command.GET_SIGNED_TOKEN);if(r?.token)return r.token}catch(_){}}return initialToken}
+  async function api(url,body){const token=await getFreshToken();const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','x-pipedrive-token':token},body:JSON.stringify({...body,token})});const json=await response.json().catch(()=>({ok:false,error:'Resposta inválida do servidor.'}));if(!response.ok||json.ok===false){const e=new Error(json.error||`HTTP ${response.status}`);e.payload=json;throw e}return json}
 
-  function renderExistingOrganizations(items){
-    existingOrganizations=items||[];
-    el('existingList').innerHTML=existingOrganizations.map(org=>`<label class="choice"><input type="radio" name="org" value="${Number(org.id)}"><div><div class="choice-title">${escapeHtml(org.name||'Organização')}</div><div class="choice-meta">ID #${Number(org.id)}${org.address?' • '+escapeHtml(org.address):''}</div></div></label>`).join('');
-    el('existingList').querySelectorAll('input[name="org"]').forEach(r=>r.addEventListener('change',async ev=>{
-      selectedOrganization=existingOrganizations.find(x=>Number(x.id)===Number(ev.target.value));
-      await loadPersons(selectedOrganization);
-    }));
-    el('existingCard').style.display='block';
-    if(existingOrganizations.length===1){const r=el('existingList').querySelector('input[name="org"]');r.checked=true;selectedOrganization=existingOrganizations[0];loadPersons(selectedOrganization)}
-  }
+  function fillFromRegistry(registry){if(!registry?.found||!registry.data)return;const d=registry.data;el('registryStatus').textContent=d.registryStatus||'SEM SITUAÇÃO';el('registryStatus').className='badge '+(registry.active?'active':'blocked');el('registryDate').textContent=d.registryStatusDate?`Situação desde ${formatDateBr(d.registryStatusDate)}`:'';el('registryLegalName').textContent=d.legalName||'-';el('registryTradeName').textContent=d.tradeName||'-';el('registryCity').textContent=[d.city,d.state].filter(Boolean).join(' / ')||'-';el('registryCnae').textContent=[d.cnae,d.cnaeDescription].filter(Boolean).join(' - ')||'-';el('registryLegalNature').textContent=d.legalNature||'-';el('qsaDetails').style.display=d.qsaText?'block':'none';el('registryQsa').textContent=d.qsaText||'';el('registryWarning').textContent=registry.active?'Dados preenchidos automaticamente. Revise antes de salvar.':`Cadastro bloqueado: situação ${d.registryStatus||'não ativa'}.`;registryAllowsCreation=Boolean(registry.active);el('registryCard').style.display='block';return d}
 
-  async function loadPersons(org){
-    el('contactCard').style.display='block';
-    el('personList').innerHTML='';
-    el('personListWrap').style.display='none';
-    setBusy(true,'Carregando contatos da organização...');
-    try{
-      const result=await api('/api/persons-by-organization',{companyId,organizationId:org.id});
-      existingPersons=result.persons||[];
-      if(existingPersons.length){
-        el('personListWrap').style.display='block';
-        el('personList').innerHTML=existingPersons.map(p=>{
-          const meta=[...(p.phones||[]),...(p.emails||[])].slice(0,2).join(' • ');
-          return `<label class="choice"><input type="radio" name="person" value="${Number(p.id)}"><div><div class="choice-title">${escapeHtml(p.name)}</div><div class="choice-meta">ID #${Number(p.id)}${meta?' • '+escapeHtml(meta):''}</div></div></label>`;
-        }).join('');
-        el('personList').querySelectorAll('input[name="person"]').forEach(r=>r.addEventListener('change',ev=>{selectedPerson=existingPersons.find(x=>Number(x.id)===Number(ev.target.value));el('btnUsePerson').disabled=!selectedPerson}));
-      }
-      el('existingContactName').focus();
-    }catch(e){setMessage(e.message,'error')}finally{setBusy(false)}
-  }
+  function applyRegistryToForm(d){el('legalName').value=d.legalName||'';el('tradeName').value=d.tradeName||'';el('postalCode').value=formatCep(d.postalCode||'');el('state').value=d.state||'';el('city').value=d.city||'';el('addressLine').value=d.addressLine||'';if(d.phone)el('phone').value=d.phone;if(d.email)el('email').value=d.email;el('newDealTitle').value=d.tradeName||d.legalName||''}
 
-  function fillFromRegistry(registry){
-    if(!registry?.found||!registry.data)return;const d=registry.data;
-    el('registryStatus').textContent=d.registryStatus||'SEM SITUAÇÃO';el('registryStatus').className='badge '+(registry.active?'active':'blocked');
-    el('registryDate').textContent=d.registryStatusDate?`Situação desde ${d.registryStatusDate}`:'';
-    el('registryLegalName').textContent=d.legalName||'-';el('registryTradeName').textContent=d.tradeName||'-';el('registryCity').textContent=[d.city,d.state].filter(Boolean).join(' / ')||'-';el('registryCnae').textContent=[d.cnae,d.cnaeDescription].filter(Boolean).join(' - ')||'-';el('registryLegalNature').textContent=d.legalNature||'-';
-    el('qsaDetails').style.display=d.qsaText?'block':'none';el('registryQsa').textContent=d.qsaText||'';el('registryWarning').textContent=registry.active?'Dados preenchidos automaticamente. Revise antes de salvar.':`Cadastro bloqueado: situação ${d.registryStatus||'não ativa'}.`;
-    el('legalName').value=d.legalName||'';el('tradeName').value=d.tradeName||'';el('postalCode').value=formatCep(d.postalCode||'');el('state').value=d.state||'';el('city').value=d.city||'';el('addressLine').value=d.addressLine||'';if(d.phone)el('phone').value=d.phone;if(d.email)el('email').value=d.email;
-    registryAllowsCreation=Boolean(registry.active);el('registryCard').style.display='block';
-  }
+  function renderExistingOrganizations(items){existingOrganizations=items||[];el('existingList').innerHTML=existingOrganizations.map(org=>`<label class="choice"><input type="radio" name="org" value="${Number(org.id)}"><div><div class="choice-title">${escapeHtml(org.name||'Organização')}</div><div class="choice-meta">ID #${Number(org.id)}${org.address?' • '+escapeHtml(org.address):''}</div></div></label>`).join('');el('existingList').querySelectorAll('input[name="org"]').forEach(r=>r.addEventListener('change',async ev=>{selectedOrganization=existingOrganizations.find(x=>Number(x.id)===Number(ev.target.value));el('btnSyncOrg').disabled=!selectedOrganization;await loadPersons(selectedOrganization)}));el('existingCard').style.display='block';if(existingOrganizations.length===1){const r=el('existingList').querySelector('input[name="org"]');r.checked=true;selectedOrganization=existingOrganizations[0];el('btnSyncOrg').disabled=false;loadPersons(selectedOrganization)}}
+
+  async function loadPersons(org){el('contactCard').style.display='block';el('personList').innerHTML='';el('personListWrap').style.display='none';setBusy(true,'Carregando contatos...');try{const result=await api('/api/persons-by-organization',{companyId,organizationId:org.id});existingPersons=result.persons||[];if(existingPersons.length){el('personListWrap').style.display='block';el('personList').innerHTML=existingPersons.map(p=>{const meta=[...(p.phones||[]),...(p.emails||[])].slice(0,2).join(' • ');return `<label class="choice"><input type="radio" name="person" value="${Number(p.id)}"><div><div class="choice-title">${escapeHtml(p.name)}</div><div class="choice-meta">ID #${Number(p.id)}${meta?' • '+escapeHtml(meta):''}</div></div></label>`}).join('');el('personList').querySelectorAll('input[name="person"]').forEach(r=>r.addEventListener('change',ev=>{selectedPerson=existingPersons.find(x=>Number(x.id)===Number(ev.target.value));el('btnUsePerson').disabled=!selectedPerson}))}el('existingContactName').focus()}catch(e){setMessage(e.message,'error')}finally{setBusy(false)}}
+
+  async function syncExisting(){if(!selectedOrganization||!lastCnpj)return;setBusy(true,'Atualizando dados cadastrais...');try{const r=await api('/api/sync-existing-organization',{companyId,organizationId:selectedOrganization.id,cnpj:lastCnpj});fillFromRegistry(r.registry);setMessage('✓ Dados cadastrais atualizados na Organização do Pipedrive.','success')}catch(e){setMessage(e.message,'error')}finally{setBusy(false)}}
 
   async function checkCnpj(){
-    resetPanels();setMessage('');const cnpj=normalizeCnpj(el('cnpj').value);if(cnpj.length!==14)return setMessage('Informe as 14 posições do CNPJ.','error');
-    setBusy(true,'Consultando Pipedrive e dados cadastrais...');
-    try{
-      const result=await api('/api/check-cnpj',{companyId,cnpj});lastCnpj=result.cnpj;el('cnpj').value=result.formattedCnpj;setMessage('✓ CNPJ válido.','success');
-      if(result.exists){renderExistingOrganizations(result.organizations||[]);return}
-      if(result.registry?.found){fillFromRegistry(result.registry);if(!result.registry.active){setMessage(`CNPJ com situação cadastral ${result.registry.status}. Cadastro bloqueado.`,'error');return}el('newCard').style.display='block';el('newCompanyMessage').textContent='✓ Empresa não existe no Pipedrive. Dados cadastrais preenchidos.';el('contactName').focus();return}
-      registryAllowsCreation=true;el('registryUnavailableCard').style.display='block';el('registryUnavailableText').textContent=result.registry?.warning||'Não foi possível consultar os dados cadastrais.';el('newCard').style.display='block';el('newCompanyMessage').textContent='✓ Empresa não existe no Pipedrive. Preencha os dados manualmente.';el('legalName').focus();
-    }catch(e){setMessage(e.message,'error')}finally{setBusy(false)}
+    ['existingCard','contactCard','registryCard','registryUnavailableCard','newCard','readyCard'].forEach(id=>el(id).style.display='none');selectedOrganization=null;selectedPerson=null;readyOrganization=null;readyPerson=null;existingOrganizations=[];existingPersons=[];registryAllowsCreation=false;createdDealId=null;dealRequestId=newRequestId();setMessage('');
+    const cnpj=normalizeCnpj(el('cnpj').value);if(cnpj.length!==14)return setMessage('Informe as 14 posições do CNPJ.','error');setBusy(true,'Consultando Pipedrive e dados cadastrais...');
+    try{const result=await api('/api/check-cnpj',{companyId,cnpj});lastCnpj=result.cnpj;el('cnpj').value=result.formattedCnpj;setMessage('✓ CNPJ válido.','success');if(result.exists){renderExistingOrganizations(result.organizations||[]);return}if(result.registry?.found){const d=fillFromRegistry(result.registry);if(!result.registry.active){setMessage(`CNPJ com situação cadastral ${result.registry.status}. Cadastro bloqueado.`,'error');return}applyRegistryToForm(d);el('newCard').style.display='block';el('newCompanyMessage').textContent='✓ Empresa não existe no Pipedrive. Dados cadastrais preenchidos.';el('contactName').focus();return}registryAllowsCreation=true;el('registryUnavailableCard').style.display='block';el('registryUnavailableText').textContent=result.registry?.warning||'Não foi possível consultar os dados cadastrais.';el('newCard').style.display='block';el('newCompanyMessage').textContent='✓ Empresa não existe no Pipedrive. Preencha os dados manualmente.';el('legalName').focus()}catch(e){setMessage(e.message,'error')}finally{setBusy(false)}
   }
 
-  function contactIds(existing=false){
-    return existing
-      ? {name:'existingContactName',phone:'existingPhone',email:'existingEmail'}
-      : {name:'contactName',phone:'phone',email:'email'};
-  }
-  function validContact(existing=false){
-    const ids=contactIds(existing);
-    const name=el(ids.name).value.trim(), phone=el(ids.phone).value.trim(), email=el(ids.email).value.trim();
-    if(!name){el(ids.name).focus();setMessage('Informe o nome do contato.','error');return false}
-    if(!phone){el(ids.phone).focus();setMessage('Informe o telefone do contato.','error');return false}
-    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){el(ids.email).focus();setMessage('Informe um e-mail válido.','error');return false}
-    return true;
-  }
+  function validContact(existing=false){const ids=existing?{name:'existingContactName',phone:'existingPhone',email:'existingEmail'}:{name:'contactName',phone:'phone',email:'email'};const name=el(ids.name).value.trim(),phone=el(ids.phone).value.trim(),email=el(ids.email).value.trim();if(!name){el(ids.name).focus();setMessage('Informe o nome do contato.','error');return false}if(!phone){el(ids.phone).focus();setMessage('Informe o telefone do contato.','error');return false}if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){el(ids.email).focus();setMessage('Informe um e-mail válido.','error');return false}return true}
 
-  function markReady(org,person){
-    readyOrganization=org;
-    readyPerson=person;
-    el('readyOrg').textContent=`${org.name} (#${org.id})`;
-    el('readyPerson').textContent=`${person.name} (#${person.id})`;
-    el('readyCard').style.display='block';
-    // Se não houver operação em andamento, garante que o botão fique disponível.
-    // O setBusy restaurará o estado correto ao finalizar uma operação aninhada.
-    if(busyDepth===0)el('btnOpenDeal').disabled=false;
-    el('readyCard').scrollIntoView({behavior:'smooth',block:'nearest'});
-    setMessage('✓ Empresa e contato prontos.','success');
-  }
+  function markReady(org,person){readyOrganization=org;readyPerson=person;el('readyOrg').textContent=`${org.name} (#${org.id})`;el('readyPerson').textContent=`${person.name} (#${person.id})`;if(!el('dealTitle').value)el('dealTitle').value=org.name;el('readyCard').style.display='block';el('readyCard').scrollIntoView({behavior:'smooth',block:'nearest'});setMessage('✓ Empresa e contato prontos.','success')}
 
-  async function createExistingContact(){
-    if(!selectedOrganization)return setMessage('Selecione uma organização.','error');if(!validContact(true))return;
-    setBusy(true,'Criando contato...');try{const r=await api('/api/create-contact-existing',{companyId,organizationId:selectedOrganization.id,contactName:el('existingContactName').value,phone:el('existingPhone').value,email:el('existingEmail').value});markReady(r.organization,r.person)}catch(e){setMessage(e.message,'error')}finally{setBusy(false)}
-  }
+  async function createExistingContact(){if(!selectedOrganization)return setMessage('Selecione uma organização.','error');if(!validContact(true))return;setBusy(true,'Criando contato...');try{const r=await api('/api/create-contact-existing',{companyId,organizationId:selectedOrganization.id,contactName:el('existingContactName').value,phone:el('existingPhone').value,email:el('existingEmail').value});markReady(r.organization,r.person)}catch(e){setMessage(e.message,'error')}finally{setBusy(false)}}
 
-  function validateNewClient(){
-    if(!registryAllowsCreation){setMessage('A situação cadastral não permite criar esta empresa.','error');return false}
-    if(!el('legalName').value.trim()){el('legalName').focus();setMessage('Informe a Razão Social.','error');return false}
-    return validContact(false);
-  }
+  async function createDealFor(org,person,title,value,currency){if(createdDealId){setMessage(`O negócio #${createdDealId} já foi criado.`,'success');return {id:createdDealId}};setBusy(true,'Criando negócio...');try{const r=await api('/api/create-deal',{companyId,organizationId:org.id,personId:person.id,dealTitle:title,dealValue:value,currency,requestId:dealRequestId});createdDealId=r.deal.id;setMessage(`✓ Negócio #${createdDealId} criado com sucesso.`,'success');try{await sdk.execute(AppExtensionsSDK.Command.SHOW_SNACKBAR,{message:`Negócio #${createdDealId} criado com sucesso.`})}catch(_){}try{await sdk.execute(AppExtensionsSDK.Command.HIDE_FLOATING_WINDOW,{context:{deal_id:createdDealId}})}catch(_){}try{await sdk.execute(AppExtensionsSDK.Command.REDIRECT_TO,{view:AppExtensionsSDK.View.DEALS,id:createdDealId})}catch(_){}return r.deal}catch(e){setMessage('Cliente mantido, mas o negócio não foi criado: '+e.message,'error');throw e}finally{setBusy(false)}}
 
-  async function createClient(){
-    if(!lastCnpj)return setMessage('Consulte o CNPJ novamente.','error');if(!validateNewClient())return;
-    setBusy(true,'Criando organização e contato...');try{
-      const r=await api('/api/create-client',{companyId,cnpj:lastCnpj,legalName:el('legalName').value,tradeName:el('tradeName').value,postalCode:el('postalCode').value,state:el('state').value,city:el('city').value,addressLine:el('addressLine').value,contactName:el('contactName').value,phone:el('phone').value,email:el('email').value});markReady(r.organization,r.person);(r.warnings||[]).forEach(w=>setMessage('✓ Cliente criado. Atenção: '+w,'success'))
-    }catch(e){setMessage(e.message,'error');if(e.payload?.code==='CNPJ_ALREADY_EXISTS')checkCnpj()}finally{setBusy(false)}
-  }
+  async function createClientAndDeal(){if(!lastCnpj)return setMessage('Consulte o CNPJ novamente.','error');if(!registryAllowsCreation)return setMessage('A situação cadastral não permite criar esta empresa.','error');if(!el('legalName').value.trim())return setMessage('Informe a Razão Social.','error');if(!validContact(false))return;const dealTitle=el('newDealTitle').value.trim();if(!dealTitle)return setMessage('Informe o título do negócio.','error');setBusy(true,'Criando organização e contato...');try{const r=await api('/api/create-client',{companyId,cnpj:lastCnpj,legalName:el('legalName').value,tradeName:el('tradeName').value,postalCode:el('postalCode').value,state:el('state').value,city:el('city').value,addressLine:el('addressLine').value,contactName:el('contactName').value,phone:el('phone').value,email:el('email').value});readyOrganization=r.organization;readyPerson=r.person;(r.warnings||[]).forEach(w=>setMessage('Atenção: '+w,'warning-text'));el('dealTitle').value=dealTitle;el('dealValue').value=el('newDealValue').value;el('dealCurrency').value=el('newDealCurrency').value||'BRL'}catch(e){setMessage(e.message,'error');if(e.payload?.code==='CNPJ_ALREADY_EXISTS')checkCnpj();return}finally{setBusy(false)}try{await createDealFor(readyOrganization,readyPerson,dealTitle,el('newDealValue').value,el('newDealCurrency').value||'BRL')}catch(_){markReady(readyOrganization,readyPerson)}}
 
-  async function openDeal(){
-    if(!sdk||!readyOrganization||!readyPerson)return setMessage('Cliente ainda não está pronto.','error');
-    if(createdDealId)return setMessage(`O negócio #${createdDealId} já foi criado. Abra-o no Pipedrive para continuar.`,'success');
-    if(dealModalOpen)return setMessage('O cadastro de negócio já está aberto. Conclua ou feche a janela nativa antes de tentar novamente.','');
+  async function createReadyDeal(){if(!readyOrganization||!readyPerson)return setMessage('Cliente ainda não está pronto.','error');const title=el('dealTitle').value.trim();if(!title)return setMessage('Informe o título do negócio.','error');await createDealFor(readyOrganization,readyPerson,title,el('dealValue').value,el('dealCurrency').value||'BRL')}
 
-    const button=el('btnOpenDeal');
-    dealModalOpen=true;
-    button.dataset.originalText=button.dataset.originalText||button.textContent;
-    button.disabled=true;
-    button.textContent='Cadastro aberto no Pipedrive...';
-    setMessage('Abrindo cadastro nativo do negócio. Clique em Salvar apenas uma vez e aguarde a conclusão.','success');
-
-    try{
-      const result=await sdk.execute(AppExtensionsSDK.Command.OPEN_MODAL,{
-        type:AppExtensionsSDK.Modal.DEAL,
-        prefill:{
-          title:readyOrganization.name,
-          organization:readyOrganization.name,
-          person:readyPerson.name
-        }
-      });
-
-      if(result?.status==='submitted'&&result?.id){
-        createdDealId=result.id;
-        button.disabled=true;
-        button.textContent=`Negócio #${result.id} criado`;
-        setMessage(`✓ Negócio #${result.id} criado. Abrindo o negócio...`,'success');
-        try{await sdk.execute(AppExtensionsSDK.Command.SHOW_SNACKBAR,{message:`Negócio #${result.id} criado com sucesso.`})}catch(_){ }
-        try{await sdk.execute(AppExtensionsSDK.Command.REDIRECT_TO,{view:AppExtensionsSDK.View.DEALS,id:result.id})}catch(_){ }
-        try{await sdk.execute(AppExtensionsSDK.Command.HIDE_FLOATING_WINDOW)}catch(_){ }
-        return;
-      }
-
-      setMessage('Cadastro do negócio fechado sem salvar. O cliente continua pronto para tentar novamente.','');
-    }catch(e){
-      setMessage('Não foi possível abrir o cadastro do negócio: '+e.message,'error');
-    }finally{
-      dealModalOpen=false;
-      if(!createdDealId){
-        button.disabled=false;
-        button.textContent=button.dataset.originalText||'Abrir novo negócio';
-      }
-    }
-  }
-
-  el('cnpj').addEventListener('input',ev=>{ev.target.value=formatCnpj(ev.target.value);resetPanels();setMessage('')});el('cnpj').addEventListener('keydown',ev=>{if(ev.key==='Enter')checkCnpj()});el('postalCode').addEventListener('input',ev=>ev.target.value=formatCep(ev.target.value));
-  el('btnCheck').addEventListener('click',checkCnpj);el('btnUsePerson').addEventListener('click',()=>{if(selectedOrganization&&selectedPerson)markReady(selectedOrganization,selectedPerson)});el('btnCreateExistingContact').addEventListener('click',createExistingContact);el('btnCreateClient').addEventListener('click',createClient);el('btnOpenDeal').addEventListener('click',openDeal);
+  el('cnpj').addEventListener('input',ev=>{ev.target.value=formatCnpj(ev.target.value)});el('cnpj').addEventListener('keydown',ev=>{if(ev.key==='Enter')checkCnpj()});el('postalCode').addEventListener('input',ev=>ev.target.value=formatCep(ev.target.value));
+  el('btnCheck').addEventListener('click',checkCnpj);el('btnSyncOrg').addEventListener('click',syncExisting);el('btnUsePerson').addEventListener('click',()=>{if(selectedOrganization&&selectedPerson)markReady(selectedOrganization,selectedPerson)});el('btnCreateExistingContact').addEventListener('click',createExistingContact);el('btnCreateClient').addEventListener('click',createClientAndDeal);el('btnCreateDeal').addEventListener('click',createReadyDeal);
 
   (async function init(){
     if(!companyId||!initialToken){setMessage('Contexto do Pipedrive incompleto. Abra esta janela pelo aplicativo no Pipedrive.','error');el('btnCheck').disabled=true;return}
-    try{sdk=await new AppExtensionsSDK().initialize({size:{width:760,height:680}})}catch(e){console.error('SDK Pipedrive:',e);setMessage('Não foi possível inicializar o SDK do Pipedrive.','error')}
+    try{sdk=await new AppExtensionsSDK().initialize({size:{width:760,height:700}});resetAll();sdk.listen(AppExtensionsSDK.Event.VISIBILITY,({data})=>{if(data?.is_visible)resetAll()})}catch(e){console.error('SDK Pipedrive:',e);setMessage('Não foi possível inicializar o SDK do Pipedrive.','error')}
   })();
 </script>
 </body>

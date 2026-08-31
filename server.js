@@ -57,6 +57,27 @@ async function initDb() {
       PRIMARY KEY (company_id, cnpj)
     )
   `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS cnpj_lookup_cache (
+      cnpj VARCHAR(14) PRIMARY KEY,
+      payload JSONB NOT NULL,
+      fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS deal_creation_registry (
+      request_id VARCHAR(80) PRIMARY KEY,
+      company_id BIGINT NOT NULL,
+      organization_id BIGINT NOT NULL,
+      person_id BIGINT,
+      deal_id BIGINT,
+      status VARCHAR(30) NOT NULL DEFAULT 'creating',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
 }
 
 function normalizeCnpj(value) {
@@ -243,7 +264,7 @@ function findOrganizationField(fields, acceptedNames) {
 }
 
 function fieldKey(field) {
-  return field?.key || field?.code || field?.field_code || null;
+  return field?.field_code || field?.key || field?.code || null;
 }
 
 async function getCnpjFieldKey(companyId) {
@@ -483,8 +504,38 @@ function buildBrasilApiAddress(data) {
   return parts.filter(Boolean).join(', ');
 }
 
-async function lookupBrasilApiCnpj(rawCnpj) {
+
+async function getCachedBrasilApiCnpj(cnpj) {
+  if (!pool) return null;
+  const result = await pool.query(
+    `SELECT payload
+       FROM cnpj_lookup_cache
+      WHERE cnpj=$1
+        AND fetched_at >= NOW() - INTERVAL '24 hours'`,
+    [cnpj]
+  );
+  return result.rows[0]?.payload || null;
+}
+
+async function saveCachedBrasilApiCnpj(cnpj, payload) {
+  if (!pool || !payload?.found) return;
+  await pool.query(
+    `INSERT INTO cnpj_lookup_cache (cnpj, payload, fetched_at)
+     VALUES ($1,$2::jsonb,NOW())
+     ON CONFLICT (cnpj)
+     DO UPDATE SET payload=EXCLUDED.payload, fetched_at=NOW()`,
+    [cnpj, JSON.stringify(payload)]
+  );
+}
+
+async function lookupBrasilApiCnpj(rawCnpj, { force = false } = {}) {
   const cnpj = normalizeCnpj(rawCnpj);
+
+  if (!force) {
+    const cached = await getCachedBrasilApiCnpj(cnpj);
+    if (cached) return cached;
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
 
@@ -492,7 +543,7 @@ async function lookupBrasilApiCnpj(rawCnpj) {
     const response = await fetch(`${BRASIL_API_CNPJ_URL}/${encodeURIComponent(cnpj)}`, {
       headers: {
         Accept: 'application/json',
-        'User-Agent': 'Pipedrive-CNPJ/5.2'
+        'User-Agent': 'Pipedrive-CNPJ/6.0'
       },
       signal: controller.signal
     });
@@ -528,7 +579,7 @@ async function lookupBrasilApiCnpj(rawCnpj) {
     const phone = clean(data.ddd_telefone_1 || data.ddd_telefone_2, 100);
     const email = normalizeEmail(data.email);
 
-    return {
+    const result = {
       found: true,
       unavailable: false,
       status,
@@ -554,6 +605,9 @@ async function lookupBrasilApiCnpj(rawCnpj) {
         qsaText: formatQsa(data.qsa)
       }
     };
+
+    await saveCachedBrasilApiCnpj(cnpj, result);
+    return result;
   } catch (error) {
     const message = error?.name === 'AbortError'
       ? 'Tempo esgotado ao consultar a BrasilAPI.'
@@ -668,6 +722,97 @@ async function linkContactsToDeal(companyId, dealId, organizationId, personId = 
   return json.data;
 }
 
+async function createDeal(companyId, organizationId, personId, data = {}) {
+  const title = clean(data.dealTitle || data.title, 255);
+  if (!title) {
+    const err = new Error('Informe o título do negócio.');
+    err.status = 422;
+    throw err;
+  }
+
+  const body = {
+    title,
+    org_id: Number(organizationId)
+  };
+
+  if (personId) body.person_id = Number(personId);
+
+  const normalizedValue = String(data.dealValue ?? '').trim().replace(',', '.');
+  const value = normalizedValue ? Number(normalizedValue) : NaN;
+  if (Number.isFinite(value) && value > 0) {
+    body.value = value;
+    body.currency = clean(data.currency || 'BRL', 3).toUpperCase() || 'BRL';
+  }
+
+  const json = await pipedriveRequest(companyId, '/api/v2/deals', {
+    method: 'POST',
+    body: JSON.stringify(body)
+  });
+  return json.data;
+}
+
+async function createDealIdempotent(companyId, organizationId, personId, data = {}) {
+  const requestId = clean(data.requestId, 80);
+  if (!requestId) {
+    const err = new Error('requestId não informado para criação segura do negócio.');
+    err.status = 400;
+    throw err;
+  }
+
+  const current = await pool.query(
+    `SELECT deal_id, status
+       FROM deal_creation_registry
+      WHERE request_id=$1`,
+    [requestId]
+  );
+
+  if (current.rows[0]?.deal_id) {
+    const deal = await pipedriveRequest(companyId, `/api/v2/deals/${current.rows[0].deal_id}`);
+    return { deal: deal.data, reused: true };
+  }
+
+  const reserve = await pool.query(
+    `INSERT INTO deal_creation_registry
+      (request_id, company_id, organization_id, person_id, status, updated_at)
+     VALUES ($1,$2,$3,$4,'creating',NOW())
+     ON CONFLICT (request_id) DO NOTHING
+     RETURNING request_id`,
+    [requestId, companyId, organizationId, personId || null]
+  );
+
+  if (!reserve.rows.length) {
+    const again = await pool.query(
+      `SELECT deal_id, status FROM deal_creation_registry WHERE request_id=$1`,
+      [requestId]
+    );
+    if (again.rows[0]?.deal_id) {
+      const deal = await pipedriveRequest(companyId, `/api/v2/deals/${again.rows[0].deal_id}`);
+      return { deal: deal.data, reused: true };
+    }
+    const err = new Error('A criação deste negócio já está em andamento. Aguarde alguns segundos.');
+    err.status = 409;
+    throw err;
+  }
+
+  try {
+    const deal = await createDeal(companyId, organizationId, personId, data);
+    await pool.query(
+      `UPDATE deal_creation_registry
+          SET deal_id=$2, status='created', updated_at=NOW()
+        WHERE request_id=$1`,
+      [requestId, deal.id]
+    );
+    return { deal, reused: false };
+  } catch (error) {
+    await pool.query(
+      `DELETE FROM deal_creation_registry
+        WHERE request_id=$1 AND deal_id IS NULL`,
+      [requestId]
+    ).catch(() => {});
+    throw error;
+  }
+}
+
 function validateNewCompanyPayload(body) {
   const legalName = clean(body.legalName);
   const contactName = clean(body.contactName);
@@ -702,7 +847,7 @@ app.get('/health', async (_req, res) => {
     database,
     pipedriveConfigured: Boolean(CLIENT_ID && CLIENT_SECRET && CALLBACK_URL),
     callbackUrl: CALLBACK_URL || null,
-    version: '5.2.0'
+    version: '6.0.0'
   });
 });
 
@@ -710,7 +855,7 @@ app.get('/', (_req, res) => {
   res.type('html').send(`<!doctype html>
   <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Pipedrive CNPJ MVP</title><style>body{font-family:Arial,sans-serif;max-width:720px;margin:60px auto;padding:0 24px;color:#252525}code{background:#f3f3f3;padding:3px 6px;border-radius:4px}</style></head>
-  <body><h1>Pipedrive CNPJ MVP v5</h1><p>Serviço online.</p><p>Janela flutuante: <code>/floating</code></p><p>Modal legado: <code>/modal</code></p><p>OAuth callback: <code>/oauth/callback</code></p><p>Health: <code>/health</code></p></body></html>`);
+  <body><h1>Pipedrive CNPJ MVP v6</h1><p>Serviço online.</p><p>Janela flutuante: <code>/floating</code></p><p>Modal legado: <code>/modal</code></p><p>OAuth callback: <code>/oauth/callback</code></p><p>Health: <code>/health</code></p></body></html>`);
 });
 
 app.get('/oauth/callback', async (req, res) => {
@@ -1190,10 +1335,92 @@ app.post('/api/create-client', async (req, res) => {
   }
 });
 
+
+app.post('/api/create-deal', async (req, res) => {
+  try {
+    assertConfig();
+    const token = req.get('x-pipedrive-token') || req.body?.token;
+    const payload = verifyExtensionToken(token);
+    const companyId = String(req.body.companyId || '');
+    const organizationId = Number(req.body.organizationId);
+    const personId = Number(req.body.personId);
+
+    if (!companyId || !organizationId || !personId) {
+      return res.status(400).json({ ok: false, error: 'companyId/organizationId/personId não informados.' });
+    }
+    validateCompanyAgainstToken(payload, companyId);
+
+    const result = await createDealIdempotent(companyId, organizationId, personId, req.body);
+    res.json({
+      ok: true,
+      deal: { id: Number(result.deal.id), title: result.deal.title },
+      reused: result.reused
+    });
+  } catch (error) {
+    apiError(res, error);
+  }
+});
+
+app.post('/api/sync-existing-organization', async (req, res) => {
+  try {
+    assertConfig();
+    const token = req.get('x-pipedrive-token') || req.body?.token;
+    const payload = verifyExtensionToken(token);
+    const companyId = String(req.body.companyId || '');
+    const organizationId = Number(req.body.organizationId);
+    const cnpj = normalizeCnpj(req.body.cnpj);
+
+    if (!companyId || !organizationId || !isValidCnpj(cnpj)) {
+      return res.status(400).json({ ok: false, error: 'companyId/organizationId/CNPJ inválidos.' });
+    }
+    validateCompanyAgainstToken(payload, companyId);
+
+    const registry = await lookupBrasilApiCnpj(cnpj);
+    if (!registry.found) {
+      return res.status(422).json({ ok: false, error: registry.warning || 'Dados cadastrais não localizados.' });
+    }
+
+    const cnpjFieldKey = await getCnpjFieldKey(companyId);
+    const registryFields = await buildRegistryCustomFields(companyId, registry.data);
+    const customFields = {
+      [cnpjFieldKey]: cnpj,
+      ...registryFields.customFields
+    };
+
+    const d = registry.data;
+    const body = { custom_fields: customFields };
+    if (d.addressLine || d.postalCode || d.city || d.state) {
+      body.address = {
+        value: d.addressLine || [d.city, d.state].filter(Boolean).join(' - '),
+        country: 'Brasil',
+        admin_area_level_1: d.state || undefined,
+        locality: d.city || undefined,
+        postal_code: d.postalCode || undefined
+      };
+    }
+
+    const updated = await pipedriveRequest(
+      companyId,
+      `/api/v2/organizations/${encodeURIComponent(organizationId)}`,
+      { method: 'PATCH', body: JSON.stringify(body) }
+    );
+
+    res.json({
+      ok: true,
+      organization: { id: Number(updated.data.id), name: updated.data.name },
+      registry,
+      warnings: registryFields.warnings || []
+    });
+  } catch (error) {
+    apiError(res, error);
+  }
+});
+
+
 initDb()
   .then(() => {
     app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Pipedrive CNPJ MVP v5 ouvindo na porta ${PORT}`);
+      console.log(`Pipedrive CNPJ MVP v6 ouvindo na porta ${PORT}`);
     });
   })
   .catch((error) => {
