@@ -17,8 +17,11 @@
       --primary-hover: #17623d;
       --danger: #b42318;
       --success: #137a45;
+      --warning: #8a5b00;
       --warning-bg: #fff7e6;
       --warning-border: #f2c46d;
+      --info-bg: #eef6ff;
+      --info-border: #bad8ff;
     }
 
     * { box-sizing: border-box; }
@@ -29,7 +32,7 @@
       background: var(--bg);
       color: var(--text);
     }
-    .wrap { max-width: 760px; margin: 0 auto; }
+    .wrap { max-width: 800px; margin: 0 auto; }
     h1 { font-size: 22px; margin: 0 0 5px; }
     h2 { font-size: 16px; margin: 0 0 14px; }
     .sub { color: var(--muted); margin-bottom: 18px; font-size: 14px; }
@@ -65,6 +68,7 @@
     .message { min-height: 20px; margin: 8px 0 0; font-size: 13px; white-space: pre-wrap; }
     .error { color: var(--danger); }
     .success { color: var(--success); }
+    .warning-text { color: var(--warning); font-size: 12px; margin-top: 8px; }
     .card {
       border: 1px solid var(--border);
       border-radius: 9px;
@@ -73,7 +77,56 @@
       display: none;
     }
     .card.warning { background: var(--warning-bg); border-color: var(--warning-border); }
-    .org-name { font-weight: 700; margin: 5px 0; }
+    .card.info { background: var(--info-bg); border-color: var(--info-border); }
+    .org-choice {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      padding: 11px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      margin-top: 10px;
+      background: #fff;
+      cursor: pointer;
+    }
+    .org-choice:hover { border-color: #9ab8dd; }
+    .org-choice input { width: auto; height: auto; margin-top: 4px; }
+    .org-title { font-weight: 700; }
+    .org-meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    .status-row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:8px; }
+    .badge {
+      display:inline-flex;
+      align-items:center;
+      border-radius:999px;
+      padding:4px 9px;
+      font-size:12px;
+      font-weight:700;
+      background:#eceff3;
+    }
+    .badge.active { background:#e8f7ee; color:#137a45; }
+    .badge.blocked { background:#fdecec; color:#b42318; }
+    .registry-grid {
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:8px 18px;
+      margin-top:12px;
+      font-size:13px;
+    }
+    .registry-label { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.03em; }
+    .registry-value { font-weight:600; margin-top:2px; }
+    .qsa-box {
+      margin-top: 8px;
+      padding: 10px 12px;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      white-space: pre-wrap;
+      font-family: inherit;
+      font-size: 12px;
+      line-height: 1.45;
+      max-height: 170px;
+      overflow: auto;
+    }
     .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
     button {
       min-height: 40px;
@@ -91,10 +144,9 @@
     .done { display:none; text-align:center; padding: 30px 10px; }
     .done .icon { font-size: 46px; }
     .done h2 { margin: 8px 0; font-size: 20px; }
-    .warning-text { color: #8a5b00; font-size: 12px; margin-top: 8px; }
     @media (max-width: 640px) {
       body { padding: 16px; }
-      .grid { grid-template-columns: 1fr; }
+      .grid, .registry-grid { grid-template-columns: 1fr; }
       .full { grid-column: auto; }
     }
   </style>
@@ -103,32 +155,85 @@
   <div class="wrap">
     <div id="formArea">
       <h1>Cadastrar / Vincular empresa</h1>
-      <div class="sub">Primeiro validamos o CNPJ. Se não existir, cadastramos a empresa e o contato principal.</div>
+      <div class="sub">
+        Primeiro procuramos o CNPJ no Pipedrive. Se não existir, consultamos a BrasilAPI e preenchemos os dados cadastrais.
+      </div>
 
       <div class="deal" id="dealInfo">Carregando contexto do negócio...</div>
 
       <div class="field">
         <label for="cnpj">CNPJ *</label>
         <input id="cnpj" type="text" maxlength="18" autocomplete="off" placeholder="00.000.000/0000-00" />
-        <div class="hint">Aceita CNPJ numérico e CNPJ alfanumérico.</div>
+        <div class="hint">Aceita CNPJ numérico e o novo CNPJ alfanumérico.</div>
         <div class="message" id="message"></div>
       </div>
 
       <div class="actions" id="checkActions">
-        <button class="primary" id="btnCheck">Validar CNPJ</button>
+        <button class="primary" id="btnCheck">Consultar CNPJ</button>
       </div>
 
       <div class="card warning" id="existingCard">
-        <div>⚠️ Este CNPJ já está cadastrado.</div>
-        <div class="org-name" id="existingName"></div>
-        <div class="hint" id="existingId"></div>
+        <div><strong>⚠ CNPJ já cadastrado no Pipedrive.</strong></div>
+        <div class="hint" id="existingHint">
+          Selecione a organização correta. Se aparecer mais de uma, já existem duplicidades para este CNPJ.
+        </div>
+        <div id="existingList"></div>
         <div class="actions">
-          <button class="primary" id="btnLink">Vincular organização existente</button>
+          <button class="primary" id="btnLink" disabled>Selecionar e vincular</button>
         </div>
       </div>
 
+      <div class="card info" id="registryCard">
+        <div><strong>Dados cadastrais encontrados</strong></div>
+        <div class="status-row">
+          <span id="registryStatus" class="badge"></span>
+          <span class="hint" id="registryDate"></span>
+        </div>
+        <div class="registry-grid">
+          <div>
+            <div class="registry-label">Razão Social</div>
+            <div class="registry-value" id="registryLegalName">-</div>
+          </div>
+          <div>
+            <div class="registry-label">Nome Fantasia</div>
+            <div class="registry-value" id="registryTradeName">-</div>
+          </div>
+          <div>
+            <div class="registry-label">Município / UF</div>
+            <div class="registry-value" id="registryCity">-</div>
+          </div>
+          <div>
+            <div class="registry-label">CNAE principal</div>
+            <div class="registry-value" id="registryCnae">-</div>
+          </div>
+          <div>
+            <div class="registry-label">Natureza Jurídica</div>
+            <div class="registry-value" id="registryLegalNature">-</div>
+          </div>
+          <div>
+            <div class="registry-label">Sócios / Administradores</div>
+            <div class="registry-value" id="registryQsaCount">-</div>
+          </div>
+          <div class="full">
+            <div class="registry-label">Motivo / Situação</div>
+            <div class="registry-value" id="registryReason">-</div>
+          </div>
+          <div class="full" id="registryQsaWrap" style="display:none">
+            <div class="registry-label">Quadro Societário (QSA)</div>
+            <div class="qsa-box" id="registryQsa">-</div>
+          </div>
+        </div>
+        <div id="registryWarning" class="warning-text"></div>
+      </div>
+
+      <div class="card warning" id="registryUnavailableCard">
+        <strong>⚠ Consulta cadastral não concluída</strong>
+        <div class="hint" id="registryUnavailableText"></div>
+        <div class="warning-text">Para o MVP, você ainda pode preencher os dados manualmente.</div>
+      </div>
+
       <div class="card" id="newCard">
-        <div class="success">✓ CNPJ válido e não localizado no Pipedrive.</div>
+        <div class="success" id="newCompanyMessage">✓ CNPJ válido e não localizado no Pipedrive.</div>
 
         <div class="section">
           <h2>Dados da empresa</h2>
@@ -140,7 +245,7 @@
             <div class="field full">
               <label for="tradeName">Nome Fantasia</label>
               <input id="tradeName" type="text" maxlength="255" autocomplete="off" />
-              <div class="hint">Se existir um campo de Organização chamado “Nome Fantasia”, o MVP o preencherá automaticamente.</div>
+              <div class="hint">Se existir um campo de Organização chamado “Nome Fantasia”, ele será preenchido.</div>
             </div>
             <div class="field">
               <label for="postalCode">CEP</label>
@@ -171,6 +276,9 @@
 
         <div class="section">
           <h2>Contato principal</h2>
+          <div class="hint" style="margin-bottom:12px">
+            Telefone e e-mail cadastrais retornados pela consulta são apenas sugestões. Confirme os dados do contato principal.
+          </div>
           <div class="grid">
             <div class="field full">
               <label for="contactName">Nome do contato *</label>
@@ -207,7 +315,9 @@
   <script>
     let sdk = null;
     let lastCnpj = '';
-    let existingOrganization = null;
+    let existingOrganizations = [];
+    let selectedOrganizationId = null;
+    let registryAllowsCreation = true;
 
     const params = new URLSearchParams(window.location.search);
     const companyId = params.get('companyId') || '';
@@ -242,7 +352,7 @@
     function setBusy(busy, text = 'Processando...') {
       el('spinner').style.display = busy ? 'block' : 'none';
       el('spinner').textContent = text;
-      ['btnCheck', 'btnLink', 'btnCreate'].forEach((id) => el(id).disabled = busy);
+      ['btnCheck', 'btnLink', 'btnCreate'].forEach((id) => el(id).disabled = busy || (id === 'btnLink' && !selectedOrganizationId));
     }
 
     function setMessage(text, type = '') {
@@ -251,10 +361,15 @@
     }
 
     function resetResult() {
-      el('existingCard').style.display = 'none';
-      el('newCard').style.display = 'none';
+      ['existingCard', 'registryCard', 'registryUnavailableCard', 'newCard'].forEach((id) => {
+        el(id).style.display = 'none';
+      });
       lastCnpj = '';
-      existingOrganization = null;
+      existingOrganizations = [];
+      selectedOrganizationId = null;
+      registryAllowsCreation = true;
+      el('existingList').innerHTML = '';
+      el('btnLink').disabled = true;
     }
 
     async function api(url, payload) {
@@ -275,12 +390,83 @@
       return json;
     }
 
+    function escapeHtml(value) {
+      return String(value || '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
+
     function showDone(title, text, warnings = []) {
       el('formArea').style.display = 'none';
       el('doneArea').style.display = 'block';
       el('doneTitle').textContent = title;
       el('doneText').textContent = text;
-      el('doneWarnings').innerHTML = warnings.map((w) => `<div class="warning-text">⚠ ${w}</div>`).join('');
+      el('doneWarnings').innerHTML = warnings.map((w) => `<div class="warning-text">⚠ ${escapeHtml(w)}</div>`).join('');
+    }
+
+    function renderExistingOrganizations(items) {
+      existingOrganizations = items || [];
+      selectedOrganizationId = existingOrganizations.length === 1 ? existingOrganizations[0].id : null;
+
+      el('existingList').innerHTML = existingOrganizations.map((org, index) => {
+        const checked = selectedOrganizationId === org.id ? 'checked' : '';
+        return `
+          <label class="org-choice">
+            <input type="radio" name="organizationChoice" value="${Number(org.id)}" ${checked}>
+            <div>
+              <div class="org-title">${escapeHtml(org.name || 'Organização sem nome')}</div>
+              <div class="org-meta">ID #${Number(org.id)}${org.address ? ' • ' + escapeHtml(org.address) : ''}</div>
+            </div>
+          </label>`;
+      }).join('');
+
+      el('existingList').querySelectorAll('input[name="organizationChoice"]').forEach((radio) => {
+        radio.addEventListener('change', (event) => {
+          selectedOrganizationId = Number(event.target.value);
+          el('btnLink').disabled = false;
+        });
+      });
+
+      el('btnLink').disabled = !selectedOrganizationId;
+      el('existingCard').style.display = 'block';
+    }
+
+    function fillFromRegistry(registry) {
+      if (!registry?.found || !registry.data) return;
+      const data = registry.data;
+
+      el('registryStatus').textContent = data.registryStatus || 'SEM SITUAÇÃO';
+      el('registryStatus').className = 'badge ' + (registry.active ? 'active' : 'blocked');
+      el('registryDate').textContent = data.registryStatusDate ? `Situação desde ${data.registryStatusDate}` : '';
+      el('registryLegalName').textContent = data.legalName || '-';
+      el('registryTradeName').textContent = data.tradeName || '-';
+      el('registryCity').textContent = [data.city, data.state].filter(Boolean).join(' / ') || '-';
+      el('registryCnae').textContent = [data.cnae, data.cnaeDescription].filter(Boolean).join(' - ') || '-';
+      el('registryReason').textContent = data.registryReason || '-';
+      el('registryLegalNature').textContent = data.legalNature || '-';
+      el('registryQsaCount').textContent = data.qsaCount ? `${data.qsaCount} registro(s)` : 'Não informado';
+      el('registryQsa').textContent = data.qsaText || '-';
+      el('registryQsaWrap').style.display = data.qsaText ? 'block' : 'none';
+      el('registryWarning').textContent = registry.active
+        ? 'Dados preenchidos automaticamente. Revise antes de salvar.'
+        : `Cadastro bloqueado: situação cadastral ${data.registryStatus || 'não ativa'}.`;
+
+      el('legalName').value = data.legalName || '';
+      el('tradeName').value = data.tradeName || '';
+      el('postalCode').value = formatCep(data.postalCode || '');
+      el('state').value = data.state || '';
+      el('city').value = data.city || '';
+      el('addressLine').value = data.addressLine || '';
+
+      // São dados cadastrais da empresa. O usuário pode substituir pelos dados do contato principal.
+      if (data.phone) el('phone').value = data.phone;
+      if (data.email) el('email').value = data.email;
+
+      registryAllowsCreation = Boolean(registry.active);
+      el('registryCard').style.display = 'block';
     }
 
     async function checkCnpj() {
@@ -293,7 +479,7 @@
         return;
       }
 
-      setBusy(true, 'Validando CNPJ e consultando o Pipedrive...');
+      setBusy(true, 'Consultando o Pipedrive e os dados cadastrais...');
       try {
         const result = await api('/api/check-cnpj', { companyId, cnpj });
         lastCnpj = result.cnpj;
@@ -301,14 +487,31 @@
         setMessage('✓ CNPJ válido.', 'success');
 
         if (result.exists) {
-          existingOrganization = result.organization;
-          el('existingName').textContent = result.organization.name || 'Organização existente';
-          el('existingId').textContent = `Organização #${result.organization.id}`;
-          el('existingCard').style.display = 'block';
-        } else {
-          el('newCard').style.display = 'block';
-          el('legalName').focus();
+          renderExistingOrganizations(result.organizations || []);
+          return;
         }
+
+        if (result.registry?.found) {
+          fillFromRegistry(result.registry);
+
+          if (!result.registry.active) {
+            el('newCard').style.display = 'none';
+            setMessage(`CNPJ válido, porém com situação cadastral ${result.registry.status}. Cadastro bloqueado.`, 'error');
+            return;
+          }
+
+          el('newCard').style.display = 'block';
+          el('newCompanyMessage').textContent = '✓ CNPJ não localizado no Pipedrive. Dados cadastrais preenchidos automaticamente.';
+          el('contactName').focus();
+          return;
+        }
+
+        registryAllowsCreation = true;
+        el('registryUnavailableCard').style.display = 'block';
+        el('registryUnavailableText').textContent = result.registry?.warning || 'Não foi possível consultar os dados cadastrais.';
+        el('newCard').style.display = 'block';
+        el('newCompanyMessage').textContent = '✓ CNPJ não localizado no Pipedrive. Preencha os dados manualmente.';
+        el('legalName').focus();
       } catch (error) {
         setMessage(error.message, 'error');
       } finally {
@@ -317,18 +520,19 @@
     }
 
     async function linkExisting() {
-      if (!existingOrganization?.id) return setMessage('Valide o CNPJ novamente.', 'error');
+      if (!selectedOrganizationId) return setMessage('Selecione uma organização.', 'error');
 
-      setBusy(true, 'Vinculando organização existente ao negócio...');
+      const org = existingOrganizations.find((item) => Number(item.id) === Number(selectedOrganizationId));
+      setBusy(true, 'Vinculando organização selecionada ao negócio...');
       try {
         const result = await api('/api/link-existing', {
           companyId,
           dealId,
-          organizationId: existingOrganization.id
+          organizationId: selectedOrganizationId
         });
         showDone(
           'Empresa vinculada',
-          `${result.organization.name} (#${result.organization.id}) foi vinculada ao negócio #${result.dealId}.`
+          `${result.organization.name || org?.name || 'Organização'} (#${result.organization.id}) foi vinculada ao negócio #${result.dealId}.`
         );
       } catch (error) {
         setMessage(error.message, 'error');
@@ -338,6 +542,11 @@
     }
 
     function validateNewForm() {
+      if (!registryAllowsCreation) {
+        setMessage('A situação cadastral não permite criar esta empresa.', 'error');
+        return false;
+      }
+
       const required = [
         ['legalName', 'Razão Social'],
         ['contactName', 'Nome do contato'],
@@ -363,7 +572,7 @@
     }
 
     async function createCompanyContactAndLink() {
-      if (!lastCnpj) return setMessage('Valide o CNPJ novamente.', 'error');
+      if (!lastCnpj) return setMessage('Consulte o CNPJ novamente.', 'error');
       if (!validateNewForm()) return;
 
       setBusy(true, 'Criando organização, contato e vinculando ao negócio...');
@@ -426,7 +635,7 @@
       }
 
       try {
-        sdk = await new AppExtensionsSDK().initialize({ size: { width: 800, height: 780 } });
+        sdk = await new AppExtensionsSDK().initialize({ size: { width: 840, height: 860 } });
       } catch (error) {
         console.error('SDK Pipedrive:', error);
       }
