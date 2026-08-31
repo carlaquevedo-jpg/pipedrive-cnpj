@@ -690,7 +690,7 @@ app.get('/health', async (_req, res) => {
     database,
     pipedriveConfigured: Boolean(CLIENT_ID && CLIENT_SECRET && CALLBACK_URL),
     callbackUrl: CALLBACK_URL || null,
-    version: '4.0.0'
+    version: '5.0.0'
   });
 });
 
@@ -698,7 +698,7 @@ app.get('/', (_req, res) => {
   res.type('html').send(`<!doctype html>
   <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Pipedrive CNPJ MVP</title><style>body{font-family:Arial,sans-serif;max-width:720px;margin:60px auto;padding:0 24px;color:#252525}code{background:#f3f3f3;padding:3px 6px;border-radius:4px}</style></head>
-  <body><h1>Pipedrive CNPJ MVP v4</h1><p>Serviço online.</p><p>Modal: <code>/modal</code></p><p>OAuth callback: <code>/oauth/callback</code></p><p>Health: <code>/health</code></p></body></html>`);
+  <body><h1>Pipedrive CNPJ MVP v5</h1><p>Serviço online.</p><p>Janela flutuante: <code>/floating</code></p><p>Modal legado: <code>/modal</code></p><p>OAuth callback: <code>/oauth/callback</code></p><p>Health: <code>/health</code></p></body></html>`);
 });
 
 app.get('/oauth/callback', async (req, res) => {
@@ -963,10 +963,225 @@ app.post('/api/create-company-contact-link', async (req, res) => {
   }
 });
 
+
+// =========================
+// v5 - Fluxo antes do Deal
+// =========================
+
+app.get('/floating', (req, res) => {
+  try {
+    const token = String(req.query.token || '');
+    if (!token) {
+      return res.type('html').send(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><style>body{font-family:Arial;padding:28px;color:#333}</style></head><body><h2>Cadastrar cliente</h2><p>Esta página deve ser aberta pela janela flutuante do aplicativo dentro do Pipedrive.</p></body></html>`);
+    }
+    verifyExtensionToken(token);
+    res.sendFile(path.join(__dirname, 'public', 'floating.html'));
+  } catch (error) {
+    res.status(401).type('html').send(`<h3>Não foi possível validar a janela.</h3><p>${String(error.message || error)}</p>`);
+  }
+});
+
+function personPhones(person) {
+  const list = person?.phones || person?.phone || [];
+  return Array.isArray(list) ? list.map((x) => x?.value || x).filter(Boolean) : [];
+}
+
+function personEmails(person) {
+  const list = person?.emails || person?.email || [];
+  return Array.isArray(list) ? list.map((x) => x?.value || x).filter(Boolean) : [];
+}
+
+async function getPersonsByOrganization(companyId, organizationId) {
+  const params = new URLSearchParams({
+    org_id: String(organizationId),
+    limit: '100'
+  });
+  const json = await pipedriveRequest(companyId, `/api/v2/persons?${params.toString()}`);
+  const list = Array.isArray(json?.data) ? json.data : [];
+  return list.map((person) => ({
+    id: Number(person.id),
+    name: person.name || `Pessoa ${person.id}`,
+    phones: personPhones(person),
+    emails: personEmails(person)
+  }));
+}
+
+app.post('/api/persons-by-organization', async (req, res) => {
+  try {
+    assertConfig();
+    const token = req.get('x-pipedrive-token') || req.body?.token;
+    const payload = verifyExtensionToken(token);
+    const companyId = String(req.body.companyId || '');
+    const organizationId = Number(req.body.organizationId);
+
+    if (!companyId || !organizationId) {
+      return res.status(400).json({ ok: false, error: 'companyId/organizationId não informados.' });
+    }
+    validateCompanyAgainstToken(payload, companyId);
+
+    const organization = await getOrganization(companyId, organizationId, await getCnpjFieldKey(companyId));
+    const persons = await getPersonsByOrganization(companyId, organizationId);
+
+    res.json({
+      ok: true,
+      organization: { id: organizationId, name: organization?.name || `Organização ${organizationId}` },
+      persons
+    });
+  } catch (error) {
+    apiError(res, error);
+  }
+});
+
+app.post('/api/create-contact-existing', async (req, res) => {
+  try {
+    assertConfig();
+    const token = req.get('x-pipedrive-token') || req.body?.token;
+    const payload = verifyExtensionToken(token);
+    const companyId = String(req.body.companyId || '');
+    const organizationId = Number(req.body.organizationId);
+
+    if (!companyId || !organizationId) {
+      return res.status(400).json({ ok: false, error: 'companyId/organizationId não informados.' });
+    }
+    validateCompanyAgainstToken(payload, companyId);
+
+    const validationError = validateNewCompanyPayload({
+      legalName: 'organização existente',
+      contactName: req.body.contactName,
+      phone: req.body.phone,
+      email: req.body.email
+    });
+    if (validationError) return res.status(422).json({ ok: false, error: validationError });
+
+    const organization = await getOrganization(companyId, organizationId, await getCnpjFieldKey(companyId));
+    const person = await createPerson(companyId, organizationId, req.body);
+
+    res.json({
+      ok: true,
+      action: 'created_contact_for_existing_organization',
+      organization: { id: organizationId, name: organization?.name || `Organização ${organizationId}` },
+      person: { id: Number(person.id), name: person.name }
+    });
+  } catch (error) {
+    apiError(res, error);
+  }
+});
+
+app.post('/api/create-client', async (req, res) => {
+  let reservationMade = false;
+  let companyId;
+  let cnpj;
+
+  try {
+    assertConfig();
+    const token = req.get('x-pipedrive-token') || req.body?.token;
+    const payload = verifyExtensionToken(token);
+
+    companyId = String(req.body.companyId || '');
+    cnpj = normalizeCnpj(req.body.cnpj);
+    if (!companyId) return res.status(400).json({ ok: false, error: 'companyId não informado.' });
+    validateCompanyAgainstToken(payload, companyId);
+
+    if (!isValidCnpj(cnpj)) return res.status(422).json({ ok: false, error: 'CNPJ inválido.' });
+
+    const validationError = validateNewCompanyPayload(req.body);
+    if (validationError) return res.status(422).json({ ok: false, error: validationError });
+
+    const existingResult = await searchOrganizationsByCnpj(companyId, cnpj);
+    if (existingResult.organizations.length) {
+      return res.status(409).json({
+        ok: false,
+        code: 'CNPJ_ALREADY_EXISTS',
+        error: 'Este CNPJ já existe no Pipedrive. Revalide e selecione a organização existente.',
+        organizations: existingResult.organizations.map((org) => ({ id: org.id, name: org.name }))
+      });
+    }
+
+    const registryValidation = await lookupBrasilApiCnpj(cnpj);
+    if (registryValidation.found && !registryValidation.active) {
+      return res.status(422).json({
+        ok: false,
+        code: 'CNPJ_NOT_ACTIVE',
+        error: `CNPJ com situação cadastral ${registryValidation.status || 'NÃO ATIVA'}. O cadastro foi bloqueado.`,
+        registry: registryValidation
+      });
+    }
+
+    const reserve = await pool.query(
+      `INSERT INTO cnpj_registry (company_id, cnpj, status, updated_at)
+       VALUES ($1,$2,'creating',NOW())
+       ON CONFLICT (company_id, cnpj) DO NOTHING
+       RETURNING company_id`,
+      [companyId, cnpj]
+    );
+
+    if (!reserve.rows.length) {
+      const current = await pool.query(
+        'SELECT organization_id, status FROM cnpj_registry WHERE company_id=$1 AND cnpj=$2',
+        [companyId, cnpj]
+      );
+      const row = current.rows[0];
+      if (row?.organization_id) {
+        const err = new Error('Este CNPJ já foi criado por outro processo. Revalide o CNPJ para selecionar a empresa existente.');
+        err.status = 409;
+        throw err;
+      }
+      const err = new Error('Este CNPJ está sendo cadastrado por outro processo. Aguarde alguns segundos e tente novamente.');
+      err.status = 409;
+      throw err;
+    }
+    reservationMade = true;
+
+    const cnpjFieldKey = await getCnpjFieldKey(companyId);
+    const createResult = await createOrganization(
+      companyId,
+      req.body,
+      cnpj,
+      cnpjFieldKey,
+      registryValidation.found ? registryValidation.data : null
+    );
+    const organization = createResult.organization;
+
+    await pool.query(
+      `UPDATE cnpj_registry
+          SET organization_id=$3, status='organization_created', updated_at=NOW()
+        WHERE company_id=$1 AND cnpj=$2`,
+      [companyId, cnpj, organization.id]
+    );
+
+    const person = await createPerson(companyId, organization.id, req.body);
+
+    await pool.query(
+      `UPDATE cnpj_registry SET status='ready', updated_at=NOW()
+        WHERE company_id=$1 AND cnpj=$2`,
+      [companyId, cnpj]
+    );
+
+    res.json({
+      ok: true,
+      action: 'created_client_before_deal',
+      organization: { id: Number(organization.id), name: organization.name },
+      person: { id: Number(person.id), name: person.name },
+      warnings: createResult.warnings || []
+    });
+  } catch (error) {
+    if (reservationMade && pool && companyId && cnpj) {
+      try {
+        await pool.query(
+          `DELETE FROM cnpj_registry
+            WHERE company_id=$1 AND cnpj=$2 AND status='creating' AND organization_id IS NULL`,
+          [companyId, cnpj]
+        );
+      } catch (_) {}
+    }
+    apiError(res, error);
+  }
+});
+
 initDb()
   .then(() => {
     app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Pipedrive CNPJ MVP v4 ouvindo na porta ${PORT}`);
+      console.log(`Pipedrive CNPJ MVP v5 ouvindo na porta ${PORT}`);
     });
   })
   .catch((error) => {

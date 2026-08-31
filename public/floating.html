@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cadastrar cliente</title>
+  <script src="https://cdn.jsdelivr.net/npm/@pipedrive/app-extensions-sdk@0/dist/index.umd.js"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg:#fff; --card:#f7f8fa; --text:#22252a; --muted:#6b7280; --border:#d6dae0;
+      --primary:#1f7a4d; --primary-hover:#17623d; --danger:#b42318; --success:#137a45;
+      --warning:#8a5b00; --warning-bg:#fff7e6; --warning-border:#f2c46d;
+      --info-bg:#eef6ff; --info-border:#bad8ff;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;padding:18px;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;background:var(--bg);color:var(--text)}
+    .wrap{max-width:740px;margin:0 auto}
+    h1{font-size:21px;margin:0 0 4px} h2{font-size:15px;margin:0 0 12px}
+    .sub{font-size:13px;color:var(--muted);margin-bottom:16px}
+    .section{border-top:1px solid var(--border);padding-top:14px;margin-top:14px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}.full{grid-column:1/-1}
+    label{display:block;font-size:13px;font-weight:650;margin-bottom:5px}
+    input{width:100%;height:39px;border:1px solid var(--border);border-radius:7px;padding:0 10px;font-size:14px;background:#fff;color:var(--text)}
+    input:focus{outline:2px solid #2f80ed33;border-color:#2f80ed}
+    .hint{font-size:11px;color:var(--muted);margin-top:5px}.message{min-height:18px;font-size:12px;margin-top:7px;white-space:pre-wrap}
+    .error{color:var(--danger)}.success{color:var(--success)}.warning-text{color:var(--warning);font-size:11px;margin-top:7px}
+    .card{display:none;border:1px solid var(--border);border-radius:9px;padding:13px;margin-top:14px}.card.warning{background:var(--warning-bg);border-color:var(--warning-border)}.card.info{background:var(--info-bg);border-color:var(--info-border)}
+    .choice{display:flex;gap:9px;align-items:flex-start;padding:9px;border:1px solid var(--border);border-radius:8px;background:#fff;margin-top:8px;cursor:pointer}.choice:hover{border-color:#9ab8dd}.choice input{width:auto;height:auto;margin-top:3px}
+    .choice-title{font-weight:700;font-size:13px}.choice-meta{color:var(--muted);font-size:11px;margin-top:3px}
+    .badge{display:inline-flex;border-radius:999px;padding:3px 8px;font-size:11px;font-weight:700;background:#eceff3}.badge.active{background:#e8f7ee;color:#137a45}.badge.blocked{background:#fdecec;color:#b42318}
+    .registry-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px 14px;margin-top:10px;font-size:12px}.registry-label{font-size:10px;color:var(--muted);text-transform:uppercase}.registry-value{font-weight:600;margin-top:2px}
+    details{margin-top:9px;font-size:12px}summary{cursor:pointer;font-weight:650}.qsa{white-space:pre-wrap;padding:8px;background:#fff;border:1px solid var(--border);border-radius:7px;margin-top:7px;max-height:100px;overflow:auto}
+    .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;flex-wrap:wrap}
+    button{min-height:38px;border:1px solid transparent;border-radius:7px;padding:0 14px;font-weight:650;cursor:pointer;font-size:13px}button.primary{background:var(--primary);color:#fff}button.primary:hover{background:var(--primary-hover)}button.secondary{background:#fff;color:var(--text);border-color:var(--border)}button:disabled{opacity:.55;cursor:not-allowed}
+    .divider{display:flex;align-items:center;gap:9px;color:var(--muted);font-size:11px;margin:13px 0}.divider:before,.divider:after{content:"";height:1px;background:var(--border);flex:1}
+    .ready{background:#edf9f1;border-color:#b9dfc7}.ready-line{font-size:13px;margin-top:5px}.ready-line strong{display:inline-block;min-width:95px}
+    .busy{display:none;font-size:12px;color:var(--muted);margin-top:8px}
+    @media(max-width:620px){body{padding:13px}.grid,.registry-grid{grid-template-columns:1fr}.full{grid-column:auto}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Cadastrar cliente</h1>
+  <div class="sub">Valide a empresa e o contato antes de abrir o cadastro nativo do negócio.</div>
+
+  <div class="field">
+    <label for="cnpj">CNPJ *</label>
+    <input id="cnpj" maxlength="18" autocomplete="off" placeholder="00.000.000/0000-00" />
+    <div class="hint">Primeiro procuramos no Pipedrive. Se não existir, consultamos a BrasilAPI.</div>
+    <div id="message" class="message"></div>
+  </div>
+  <div class="actions" id="checkActions"><button id="btnCheck" class="primary">Consultar CNPJ</button></div>
+  <div id="busy" class="busy"></div>
+
+  <div id="existingCard" class="card warning">
+    <strong>⚠ Empresa já cadastrada no Pipedrive</strong>
+    <div class="hint">Selecione a organização correta. Se aparecer mais de uma, já há duplicidade histórica desse CNPJ.</div>
+    <div id="existingList"></div>
+  </div>
+
+  <div id="contactCard" class="card">
+    <h2>Contato da organização</h2>
+    <div id="personListWrap" style="display:none">
+      <div class="hint">Selecione um contato já cadastrado:</div>
+      <div id="personList"></div>
+      <div class="actions"><button id="btnUsePerson" class="primary" disabled>Usar contato selecionado</button></div>
+      <div class="divider">ou</div>
+    </div>
+    <div id="newContactWrap">
+      <div class="hint" style="margin-bottom:9px">Criar um novo contato vinculado à organização:</div>
+      <div class="grid">
+        <div class="full"><label for="existingContactName">Nome *</label><input id="existingContactName" /></div>
+        <div><label for="existingPhone">Telefone *</label><input id="existingPhone" /></div>
+        <div><label for="existingEmail">E-mail *</label><input id="existingEmail" type="email" /></div>
+      </div>
+      <div class="actions"><button id="btnCreateExistingContact" class="secondary">Criar novo contato</button></div>
+    </div>
+  </div>
+
+  <div id="registryCard" class="card info">
+    <strong>Dados cadastrais encontrados</strong>
+    <div style="margin-top:8px"><span id="registryStatus" class="badge"></span> <span id="registryDate" class="hint"></span></div>
+    <div class="registry-grid">
+      <div><div class="registry-label">Razão Social</div><div id="registryLegalName" class="registry-value">-</div></div>
+      <div><div class="registry-label">Nome Fantasia</div><div id="registryTradeName" class="registry-value">-</div></div>
+      <div><div class="registry-label">Município / UF</div><div id="registryCity" class="registry-value">-</div></div>
+      <div><div class="registry-label">CNAE principal</div><div id="registryCnae" class="registry-value">-</div></div>
+      <div class="full"><div class="registry-label">Natureza Jurídica</div><div id="registryLegalNature" class="registry-value">-</div></div>
+    </div>
+    <details id="qsaDetails" style="display:none"><summary>Ver quadro societário</summary><div id="registryQsa" class="qsa"></div></details>
+    <div id="registryWarning" class="warning-text"></div>
+  </div>
+
+  <div id="registryUnavailableCard" class="card warning">
+    <strong>⚠ Consulta cadastral não concluída</strong>
+    <div id="registryUnavailableText" class="hint"></div>
+    <div class="warning-text">Para este MVP, o preenchimento manual continua disponível.</div>
+  </div>
+
+  <div id="newCard" class="card">
+    <div id="newCompanyMessage" class="success">✓ CNPJ não localizado no Pipedrive.</div>
+    <div class="section">
+      <h2>Dados da empresa</h2>
+      <div class="grid">
+        <div class="full"><label for="legalName">Razão Social *</label><input id="legalName" /></div>
+        <div class="full"><label for="tradeName">Nome Fantasia</label><input id="tradeName" /></div>
+        <div><label for="postalCode">CEP</label><input id="postalCode" maxlength="9" /></div>
+        <div><label for="state">UF</label><input id="state" maxlength="2" /></div>
+        <div class="full"><label for="city">Cidade</label><input id="city" /></div>
+        <div class="full"><label for="addressLine">Endereço</label><input id="addressLine" /></div>
+      </div>
+    </div>
+    <div class="section">
+      <h2>Contato principal</h2>
+      <div class="grid">
+        <div class="full"><label for="contactName">Nome *</label><input id="contactName" /></div>
+        <div><label for="phone">Telefone *</label><input id="phone" /></div>
+        <div><label for="email">E-mail *</label><input id="email" type="email" /></div>
+      </div>
+    </div>
+    <div class="actions"><button id="btnCreateClient" class="primary">Criar cliente</button></div>
+  </div>
+
+  <div id="readyCard" class="card ready">
+    <strong>✓ Cliente pronto para criar o negócio</strong>
+    <div class="ready-line"><strong>Organização:</strong> <span id="readyOrg"></span></div>
+    <div class="ready-line"><strong>Contato:</strong> <span id="readyPerson"></span></div>
+    <div class="actions"><button id="btnOpenDeal" class="primary">Abrir novo negócio</button></div>
+    <div class="hint">O Pipedrive abrirá o formulário nativo de negócio com Organização e Pessoa pré-preenchidas.</div>
+  </div>
+</div>
+<script>
+  const el = (id) => document.getElementById(id);
+  const params = new URLSearchParams(window.location.search);
+  const companyId = params.get('companyId') || params.get('company_id') || '';
+  const initialToken = params.get('token') || '';
+
+  let sdk = null;
+  let lastCnpj = '';
+  let registryAllowsCreation = false;
+  let existingOrganizations = [];
+  let selectedOrganization = null;
+  let existingPersons = [];
+  let selectedPerson = null;
+  let readyOrganization = null;
+  let readyPerson = null;
+
+  function normalizeCnpj(value){return String(value||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,14)}
+  function formatCnpj(value){const v=normalizeCnpj(value);if(v.length<3)return v;let out=v.slice(0,2);if(v.length>2)out+='.'+v.slice(2,5);if(v.length>5)out+='.'+v.slice(5,8);if(v.length>8)out+='/'+v.slice(8,12);if(v.length>12)out+='-'+v.slice(12,14);return out}
+  function formatCep(value){const v=String(value||'').replace(/\D/g,'').slice(0,8);return v.length>5?v.slice(0,5)+'-'+v.slice(5):v}
+  function escapeHtml(value){return String(value||'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;')}
+  function setMessage(text='',type=''){el('message').textContent=text;el('message').className='message '+type}
+  function setBusy(on,text='Processando...'){
+    el('busy').style.display=on?'block':'none';el('busy').textContent=text;
+    document.querySelectorAll('button').forEach(b=>{
+      if(on){b.dataset.preBusyDisabled=b.disabled?'1':'0';b.disabled=true;}
+      else if(b.dataset.preBusyDisabled!=null){b.disabled=b.dataset.preBusyDisabled==='1';delete b.dataset.preBusyDisabled;}
+    });
+  }
+  function resetPanels(){['existingCard','contactCard','registryCard','registryUnavailableCard','newCard','readyCard'].forEach(id=>el(id).style.display='none');selectedOrganization=null;selectedPerson=null;readyOrganization=null;readyPerson=null;existingOrganizations=[];existingPersons=[];registryAllowsCreation=false}
+
+  async function getFreshToken(){
+    if(sdk){
+      try{const r=await sdk.execute(AppExtensionsSDK.Command.GET_SIGNED_TOKEN);if(r?.token)return r.token}catch(_){ }
+    }
+    return initialToken;
+  }
+  async function api(url,body){
+    const token=await getFreshToken();
+    const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','x-pipedrive-token':token},body:JSON.stringify({...body,token})});
+    const json=await response.json().catch(()=>({ok:false,error:'Resposta inválida do servidor.'}));
+    if(!response.ok||json.ok===false){const e=new Error(json.error||`HTTP ${response.status}`);e.payload=json;throw e}return json;
+  }
+
+  function renderExistingOrganizations(items){
+    existingOrganizations=items||[];
+    el('existingList').innerHTML=existingOrganizations.map(org=>`<label class="choice"><input type="radio" name="org" value="${Number(org.id)}"><div><div class="choice-title">${escapeHtml(org.name||'Organização')}</div><div class="choice-meta">ID #${Number(org.id)}${org.address?' • '+escapeHtml(org.address):''}</div></div></label>`).join('');
+    el('existingList').querySelectorAll('input[name="org"]').forEach(r=>r.addEventListener('change',async ev=>{
+      selectedOrganization=existingOrganizations.find(x=>Number(x.id)===Number(ev.target.value));
+      await loadPersons(selectedOrganization);
+    }));
+    el('existingCard').style.display='block';
+    if(existingOrganizations.length===1){const r=el('existingList').querySelector('input[name="org"]');r.checked=true;selectedOrganization=existingOrganizations[0];loadPersons(selectedOrganization)}
+  }
+
+  async function loadPersons(org){
+    el('contactCard').style.display='block';
+    el('personList').innerHTML='';
+    el('personListWrap').style.display='none';
+    setBusy(true,'Carregando contatos da organização...');
+    try{
+      const result=await api('/api/persons-by-organization',{companyId,organizationId:org.id});
+      existingPersons=result.persons||[];
+      if(existingPersons.length){
+        el('personListWrap').style.display='block';
+        el('personList').innerHTML=existingPersons.map(p=>{
+          const meta=[...(p.phones||[]),...(p.emails||[])].slice(0,2).join(' • ');
+          return `<label class="choice"><input type="radio" name="person" value="${Number(p.id)}"><div><div class="choice-title">${escapeHtml(p.name)}</div><div class="choice-meta">ID #${Number(p.id)}${meta?' • '+escapeHtml(meta):''}</div></div></label>`;
+        }).join('');
+        el('personList').querySelectorAll('input[name="person"]').forEach(r=>r.addEventListener('change',ev=>{selectedPerson=existingPersons.find(x=>Number(x.id)===Number(ev.target.value));el('btnUsePerson').disabled=!selectedPerson}));
+      }
+      el('existingContactName').focus();
+    }catch(e){setMessage(e.message,'error')}finally{setBusy(false)}
+  }
+
+  function fillFromRegistry(registry){
+    if(!registry?.found||!registry.data)return;const d=registry.data;
+    el('registryStatus').textContent=d.registryStatus||'SEM SITUAÇÃO';el('registryStatus').className='badge '+(registry.active?'active':'blocked');
+    el('registryDate').textContent=d.registryStatusDate?`Situação desde ${d.registryStatusDate}`:'';
+    el('registryLegalName').textContent=d.legalName||'-';el('registryTradeName').textContent=d.tradeName||'-';el('registryCity').textContent=[d.city,d.state].filter(Boolean).join(' / ')||'-';el('registryCnae').textContent=[d.cnae,d.cnaeDescription].filter(Boolean).join(' - ')||'-';el('registryLegalNature').textContent=d.legalNature||'-';
+    el('qsaDetails').style.display=d.qsaText?'block':'none';el('registryQsa').textContent=d.qsaText||'';el('registryWarning').textContent=registry.active?'Dados preenchidos automaticamente. Revise antes de salvar.':`Cadastro bloqueado: situação ${d.registryStatus||'não ativa'}.`;
+    el('legalName').value=d.legalName||'';el('tradeName').value=d.tradeName||'';el('postalCode').value=formatCep(d.postalCode||'');el('state').value=d.state||'';el('city').value=d.city||'';el('addressLine').value=d.addressLine||'';if(d.phone)el('phone').value=d.phone;if(d.email)el('email').value=d.email;
+    registryAllowsCreation=Boolean(registry.active);el('registryCard').style.display='block';
+  }
+
+  async function checkCnpj(){
+    resetPanels();setMessage('');const cnpj=normalizeCnpj(el('cnpj').value);if(cnpj.length!==14)return setMessage('Informe as 14 posições do CNPJ.','error');
+    setBusy(true,'Consultando Pipedrive e dados cadastrais...');
+    try{
+      const result=await api('/api/check-cnpj',{companyId,cnpj});lastCnpj=result.cnpj;el('cnpj').value=result.formattedCnpj;setMessage('✓ CNPJ válido.','success');
+      if(result.exists){renderExistingOrganizations(result.organizations||[]);return}
+      if(result.registry?.found){fillFromRegistry(result.registry);if(!result.registry.active){setMessage(`CNPJ com situação cadastral ${result.registry.status}. Cadastro bloqueado.`,'error');return}el('newCard').style.display='block';el('newCompanyMessage').textContent='✓ Empresa não existe no Pipedrive. Dados cadastrais preenchidos.';el('contactName').focus();return}
+      registryAllowsCreation=true;el('registryUnavailableCard').style.display='block';el('registryUnavailableText').textContent=result.registry?.warning||'Não foi possível consultar os dados cadastrais.';el('newCard').style.display='block';el('newCompanyMessage').textContent='✓ Empresa não existe no Pipedrive. Preencha os dados manualmente.';el('legalName').focus();
+    }catch(e){setMessage(e.message,'error')}finally{setBusy(false)}
+  }
+
+  function contactIds(existing=false){
+    return existing
+      ? {name:'existingContactName',phone:'existingPhone',email:'existingEmail'}
+      : {name:'contactName',phone:'phone',email:'email'};
+  }
+  function validContact(existing=false){
+    const ids=contactIds(existing);
+    const name=el(ids.name).value.trim(), phone=el(ids.phone).value.trim(), email=el(ids.email).value.trim();
+    if(!name){el(ids.name).focus();setMessage('Informe o nome do contato.','error');return false}
+    if(!phone){el(ids.phone).focus();setMessage('Informe o telefone do contato.','error');return false}
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){el(ids.email).focus();setMessage('Informe um e-mail válido.','error');return false}
+    return true;
+  }
+
+  function markReady(org,person){readyOrganization=org;readyPerson=person;el('readyOrg').textContent=`${org.name} (#${org.id})`;el('readyPerson').textContent=`${person.name} (#${person.id})`;el('readyCard').style.display='block';el('readyCard').scrollIntoView({behavior:'smooth',block:'nearest'});setMessage('✓ Empresa e contato prontos.','success')}
+
+  async function createExistingContact(){
+    if(!selectedOrganization)return setMessage('Selecione uma organização.','error');if(!validContact(true))return;
+    setBusy(true,'Criando contato...');try{const r=await api('/api/create-contact-existing',{companyId,organizationId:selectedOrganization.id,contactName:el('existingContactName').value,phone:el('existingPhone').value,email:el('existingEmail').value});markReady(r.organization,r.person)}catch(e){setMessage(e.message,'error')}finally{setBusy(false)}
+  }
+
+  function validateNewClient(){
+    if(!registryAllowsCreation){setMessage('A situação cadastral não permite criar esta empresa.','error');return false}
+    if(!el('legalName').value.trim()){el('legalName').focus();setMessage('Informe a Razão Social.','error');return false}
+    return validContact(false);
+  }
+
+  async function createClient(){
+    if(!lastCnpj)return setMessage('Consulte o CNPJ novamente.','error');if(!validateNewClient())return;
+    setBusy(true,'Criando organização e contato...');try{
+      const r=await api('/api/create-client',{companyId,cnpj:lastCnpj,legalName:el('legalName').value,tradeName:el('tradeName').value,postalCode:el('postalCode').value,state:el('state').value,city:el('city').value,addressLine:el('addressLine').value,contactName:el('contactName').value,phone:el('phone').value,email:el('email').value});markReady(r.organization,r.person);(r.warnings||[]).forEach(w=>setMessage('✓ Cliente criado. Atenção: '+w,'success'))
+    }catch(e){setMessage(e.message,'error');if(e.payload?.code==='CNPJ_ALREADY_EXISTS')checkCnpj()}finally{setBusy(false)}
+  }
+
+  async function openDeal(){
+    if(!sdk||!readyOrganization||!readyPerson)return setMessage('Cliente ainda não está pronto.','error');
+    setMessage('Abrindo cadastro nativo do negócio...','success');
+    try{
+      const result=await sdk.execute(AppExtensionsSDK.Command.OPEN_MODAL,{type:AppExtensionsSDK.Modal.DEAL,prefill:{title:readyOrganization.name,organization:readyOrganization.name,person:readyPerson.name}});
+      if(result?.status==='submitted'&&result?.id){
+        try{await sdk.execute(AppExtensionsSDK.Command.SHOW_SNACKBAR,{message:`Negócio #${result.id} criado com sucesso.`})}catch(_){ }
+        try{await sdk.execute(AppExtensionsSDK.Command.HIDE_FLOATING_WINDOW)}catch(_){ }
+        await sdk.execute(AppExtensionsSDK.Command.REDIRECT_TO,{view:AppExtensionsSDK.View.DEALS,id:result.id});
+      }else{setMessage('Cadastro do negócio fechado sem salvar. O cliente continua pronto para tentar novamente.','')}
+    }catch(e){setMessage('Não foi possível abrir o cadastro do negócio: '+e.message,'error')}
+  }
+
+  el('cnpj').addEventListener('input',ev=>{ev.target.value=formatCnpj(ev.target.value);resetPanels();setMessage('')});el('cnpj').addEventListener('keydown',ev=>{if(ev.key==='Enter')checkCnpj()});el('postalCode').addEventListener('input',ev=>ev.target.value=formatCep(ev.target.value));
+  el('btnCheck').addEventListener('click',checkCnpj);el('btnUsePerson').addEventListener('click',()=>{if(selectedOrganization&&selectedPerson)markReady(selectedOrganization,selectedPerson)});el('btnCreateExistingContact').addEventListener('click',createExistingContact);el('btnCreateClient').addEventListener('click',createClient);el('btnOpenDeal').addEventListener('click',openDeal);
+
+  (async function init(){
+    if(!companyId||!initialToken){setMessage('Contexto do Pipedrive incompleto. Abra esta janela pelo aplicativo no Pipedrive.','error');el('btnCheck').disabled=true;return}
+    try{sdk=await new AppExtensionsSDK().initialize({size:{width:760,height:680}})}catch(e){console.error('SDK Pipedrive:',e);setMessage('Não foi possível inicializar o SDK do Pipedrive.','error')}
+  })();
+</script>
+</body>
+</html>
