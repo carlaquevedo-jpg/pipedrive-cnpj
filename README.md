@@ -1,56 +1,82 @@
-# Pipedrive CNPJ MVP
+# Pipedrive CNPJ MVP v2
 
-MVP para abrir um Custom Modal no detalhe de um Deal, validar CNPJ, procurar uma Organização pelo campo personalizado CNPJ, criar a Organização caso não exista e vincular a Organização ao Deal.
+MVP para uso em **Custom Modal > Deal details** no Pipedrive.
 
-## Importante: CNPJ alfanumérico
+## Fluxo
 
-O validador aceita o formato legado numérico e o novo CNPJ alfanumérico (12 posições alfanuméricas + 2 DVs numéricos).
+1. Usuário abre um Deal e escolhe **Cadastrar / Vincular empresa**.
+2. Informa o CNPJ.
+3. O backend valida o DV e pesquisa Organizações no Pipedrive.
+4. Se o CNPJ já existir, a Organização existente é vinculada ao Deal.
+5. Se não existir, o modal solicita:
+   - Razão Social
+   - Nome Fantasia (opcional)
+   - CEP, Cidade, UF e Endereço (opcionais)
+   - Nome do contato
+   - Telefone
+   - E-mail
+6. O backend cria a Organização, cria a Pessoa vinculada à Organização e atualiza o Deal com `org_id` e `person_id`.
 
-## Rotas
+## Correção incluída para `Scope and URL mismatch`
 
-- `/` status simples
-- `/health` diagnóstico
-- `/modal` iframe do Custom Modal
-- `/oauth/callback` callback OAuth do Pipedrive
-- `POST /api/check-cnpj` valida e procura CNPJ
-- `POST /api/create-link` cria/reutiliza organização e vincula ao Deal
+A busca por CNPJ agora usa:
 
-## Render
+`GET /api/v2/organizations/search?fields=custom_fields&exact_match=true`
 
-### 1. Crie um Render Postgres (Free, apenas para MVP)
+em vez de `/api/v2/itemSearch/field`.
 
-Copie a **Internal Database URL**.
+Isso permite usar o scope `contacts:full` já concedido à app, sem depender de `search:read`.
 
-### 2. Crie um Web Service
+## Scopes necessários no Pipedrive
 
-- Runtime: Node
-- Build command: `npm install`
-- Start command: `npm start`
-- Instance: Free (para teste)
+- Deals: Full access
+- Contacts: Full access
 
-### 3. Variáveis de ambiente
+`Contact Fields: Full access` não é necessário para este MVP, porque o app apenas lê as definições dos campos existentes.
+
+## Campos
+
+### Organização
+
+- `name` = Razão Social
+- campo personalizado `CNPJ` = CNPJ normalizado, sem máscara
+- `address` = Endereço/CEP/Cidade/UF quando informados
+- `Nome Fantasia` = preenchido somente se existir um campo de Organização com esse nome
+
+### Pessoa
+
+- `name` = Nome do contato
+- `phones` = Telefone principal
+- `emails` = E-mail principal
+- `org_id` = Organização criada
+
+### Deal
+
+- `org_id` = Organização
+- `person_id` = Pessoa criada
+
+## Variáveis de ambiente
 
 - `PIPEDRIVE_CLIENT_ID`
 - `PIPEDRIVE_CLIENT_SECRET`
-- `PIPEDRIVE_CALLBACK_URL` = `https://SEU-SERVICO.onrender.com/oauth/callback`
-- `DATABASE_URL` = Internal Database URL do Render Postgres
-- `PIPEDRIVE_JWT_SECRET` (opcional; se a chave JWT do modal ficou em branco, deixe vazio e o app usa o client secret)
-- `PIPEDRIVE_CNPJ_FIELD_KEY` (opcional; o MVP tenta localizar automaticamente um campo de Organização chamado CNPJ)
+- `PIPEDRIVE_CALLBACK_URL`
+- `DATABASE_URL`
+- `PIPEDRIVE_JWT_SECRET` (opcional)
+- `PIPEDRIVE_CNPJ_FIELD_KEY` (opcional)
+- `PIPEDRIVE_TRADE_NAME_FIELD_KEY` (opcional)
 
-### 4. Pipedrive Developer Hub
+## Deploy no Render
 
-Callback OAuth:
+Depois de atualizar os arquivos no GitHub, use:
 
-`https://SEU-SERVICO.onrender.com/oauth/callback`
+**Manual Deploy > Deploy latest commit**
 
-Custom Modal > Iframe URL:
+Confira:
 
-`https://SEU-SERVICO.onrender.com/modal`
+`https://pipedrive-cnpj.onrender.com/health`
 
-Entry point:
+A resposta deve indicar `version: "2.0.0"`.
 
-`Deal details`
+A URL do Custom Modal continua:
 
-### 5. Instale/teste o app novamente
-
-Depois de alterar a callback, execute Install & Test novamente na sandbox.
+`https://pipedrive-cnpj.onrender.com/modal`

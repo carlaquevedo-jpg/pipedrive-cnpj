@@ -7,7 +7,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@pipedrive/app-extensions-sdk@0/dist/index.umd.js"></script>
   <style>
     :root {
-      color-scheme: light dark;
+      color-scheme: light;
       --bg: #ffffff;
       --card: #f7f8fa;
       --text: #22252a;
@@ -24,14 +24,15 @@
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      padding: 24px;
+      padding: 22px;
       font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
       background: var(--bg);
       color: var(--text);
     }
-    .wrap { max-width: 680px; margin: 0 auto; }
+    .wrap { max-width: 760px; margin: 0 auto; }
     h1 { font-size: 22px; margin: 0 0 5px; }
-    .sub { color: var(--muted); margin-bottom: 20px; font-size: 14px; }
+    h2 { font-size: 16px; margin: 0 0 14px; }
+    .sub { color: var(--muted); margin-bottom: 18px; font-size: 14px; }
     .deal {
       background: var(--card);
       border: 1px solid var(--border);
@@ -40,21 +41,28 @@
       margin-bottom: 18px;
       font-size: 13px;
     }
+    .section {
+      border-top: 1px solid var(--border);
+      padding-top: 16px;
+      margin-top: 16px;
+    }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .full { grid-column: 1 / -1; }
     label { display: block; font-weight: 650; margin: 0 0 7px; font-size: 14px; }
-    input {
+    input, select {
       width: 100%;
-      height: 44px;
+      height: 42px;
       border: 1px solid var(--border);
       border-radius: 7px;
-      padding: 0 12px;
-      font-size: 16px;
+      padding: 0 11px;
+      font-size: 15px;
       background: var(--bg);
       color: var(--text);
     }
-    input:focus { outline: 2px solid #2f80ed33; border-color: #2f80ed; }
-    .field { margin-bottom: 16px; }
+    input:focus, select:focus { outline: 2px solid #2f80ed33; border-color: #2f80ed; }
+    .field { margin-bottom: 2px; }
     .hint { color: var(--muted); margin-top: 6px; font-size: 12px; }
-    .message { min-height: 20px; margin: 8px 0 0; font-size: 13px; }
+    .message { min-height: 20px; margin: 8px 0 0; font-size: 13px; white-space: pre-wrap; }
     .error { color: var(--danger); }
     .success { color: var(--success); }
     .card {
@@ -65,7 +73,7 @@
       display: none;
     }
     .card.warning { background: var(--warning-bg); border-color: var(--warning-border); }
-    .org-name { font-weight: 700; margin: 4px 0; }
+    .org-name { font-weight: 700; margin: 5px 0; }
     .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
     button {
       min-height: 40px;
@@ -82,21 +90,27 @@
     .spinner { display:none; color: var(--muted); margin-top: 10px; font-size: 13px; }
     .done { display:none; text-align:center; padding: 30px 10px; }
     .done .icon { font-size: 46px; }
-    .done h2 { margin: 8px 0; }
+    .done h2 { margin: 8px 0; font-size: 20px; }
+    .warning-text { color: #8a5b00; font-size: 12px; margin-top: 8px; }
+    @media (max-width: 640px) {
+      body { padding: 16px; }
+      .grid { grid-template-columns: 1fr; }
+      .full { grid-column: auto; }
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div id="formArea">
       <h1>Cadastrar / Vincular empresa</h1>
-      <div class="sub">Valide o CNPJ antes de criar uma nova organização.</div>
+      <div class="sub">Primeiro validamos o CNPJ. Se não existir, cadastramos a empresa e o contato principal.</div>
 
       <div class="deal" id="dealInfo">Carregando contexto do negócio...</div>
 
       <div class="field">
         <label for="cnpj">CNPJ *</label>
         <input id="cnpj" type="text" maxlength="18" autocomplete="off" placeholder="00.000.000/0000-00" />
-        <div class="hint">Aceita CNPJ numérico e o novo CNPJ alfanumérico.</div>
+        <div class="hint">Aceita CNPJ numérico e CNPJ alfanumérico.</div>
         <div class="message" id="message"></div>
       </div>
 
@@ -109,18 +123,72 @@
         <div class="org-name" id="existingName"></div>
         <div class="hint" id="existingId"></div>
         <div class="actions">
-          <button class="primary" id="btnLink">Vincular ao negócio</button>
+          <button class="primary" id="btnLink">Vincular organização existente</button>
         </div>
       </div>
 
       <div class="card" id="newCard">
         <div class="success">✓ CNPJ válido e não localizado no Pipedrive.</div>
-        <div class="field" style="margin-top:14px">
-          <label for="companyName">Razão Social *</label>
-          <input id="companyName" type="text" maxlength="255" autocomplete="off" />
+
+        <div class="section">
+          <h2>Dados da empresa</h2>
+          <div class="grid">
+            <div class="field full">
+              <label for="legalName">Razão Social *</label>
+              <input id="legalName" type="text" maxlength="255" autocomplete="organization" />
+            </div>
+            <div class="field full">
+              <label for="tradeName">Nome Fantasia</label>
+              <input id="tradeName" type="text" maxlength="255" autocomplete="off" />
+              <div class="hint">Se existir um campo de Organização chamado “Nome Fantasia”, o MVP o preencherá automaticamente.</div>
+            </div>
+            <div class="field">
+              <label for="postalCode">CEP</label>
+              <input id="postalCode" type="text" maxlength="12" placeholder="00000-000" autocomplete="postal-code" />
+            </div>
+            <div class="field">
+              <label for="state">UF</label>
+              <select id="state">
+                <option value="">Selecione</option>
+                <option>AC</option><option>AL</option><option>AP</option><option>AM</option><option>BA</option>
+                <option>CE</option><option>DF</option><option>ES</option><option>GO</option><option>MA</option>
+                <option>MT</option><option>MS</option><option>MG</option><option>PA</option><option>PB</option>
+                <option>PR</option><option>PE</option><option>PI</option><option>RJ</option><option>RN</option>
+                <option>RS</option><option>RO</option><option>RR</option><option>SC</option><option>SP</option>
+                <option>SE</option><option>TO</option>
+              </select>
+            </div>
+            <div class="field full">
+              <label for="city">Cidade</label>
+              <input id="city" type="text" maxlength="100" autocomplete="address-level2" />
+            </div>
+            <div class="field full">
+              <label for="addressLine">Endereço</label>
+              <input id="addressLine" type="text" maxlength="500" placeholder="Rua, número, bairro, complemento" autocomplete="street-address" />
+            </div>
+          </div>
         </div>
+
+        <div class="section">
+          <h2>Contato principal</h2>
+          <div class="grid">
+            <div class="field full">
+              <label for="contactName">Nome do contato *</label>
+              <input id="contactName" type="text" maxlength="255" autocomplete="name" />
+            </div>
+            <div class="field">
+              <label for="phone">Telefone *</label>
+              <input id="phone" type="tel" maxlength="100" placeholder="(43) 99999-9999" autocomplete="tel" />
+            </div>
+            <div class="field">
+              <label for="email">E-mail *</label>
+              <input id="email" type="email" maxlength="255" placeholder="contato@empresa.com.br" autocomplete="email" />
+            </div>
+          </div>
+        </div>
+
         <div class="actions">
-          <button class="primary" id="btnCreate">Criar e vincular</button>
+          <button class="primary" id="btnCreate">Criar empresa, contato e vincular</button>
         </div>
       </div>
 
@@ -131,6 +199,7 @@
       <div class="icon">✅</div>
       <h2 id="doneTitle">Concluído</h2>
       <p id="doneText"></p>
+      <div id="doneWarnings"></div>
       <p class="hint">Você pode fechar esta janela e continuar no negócio.</p>
     </div>
   </div>
@@ -138,12 +207,12 @@
   <script>
     let sdk = null;
     let lastCnpj = '';
+    let existingOrganization = null;
 
     const params = new URLSearchParams(window.location.search);
     const companyId = params.get('companyId') || '';
     const dealId = (params.get('selectedIds') || '').split(',')[0].trim();
     const initialToken = params.get('token') || '';
-
     const el = (id) => document.getElementById(id);
 
     function normalizeCnpj(value) {
@@ -165,6 +234,11 @@
       return out;
     }
 
+    function formatCep(value) {
+      const v = String(value || '').replace(/\D/g, '').slice(0, 8);
+      return v.length > 5 ? `${v.slice(0, 5)}-${v.slice(5)}` : v;
+    }
+
     function setBusy(busy, text = 'Processando...') {
       el('spinner').style.display = busy ? 'block' : 'none';
       el('spinner').textContent = text;
@@ -180,6 +254,7 @@
       el('existingCard').style.display = 'none';
       el('newCard').style.display = 'none';
       lastCnpj = '';
+      existingOrganization = null;
     }
 
     async function api(url, payload) {
@@ -191,9 +266,21 @@
         },
         body: JSON.stringify(payload)
       });
-      const json = await response.json().catch(() => ({ ok:false, error:'Resposta inválida do servidor.' }));
-      if (!response.ok || json.ok === false) throw new Error(json.error || `HTTP ${response.status}`);
+      const json = await response.json().catch(() => ({ ok: false, error: 'Resposta inválida do servidor.' }));
+      if (!response.ok || json.ok === false) {
+        const error = new Error(json.error || `HTTP ${response.status}`);
+        error.payload = json;
+        throw error;
+      }
       return json;
+    }
+
+    function showDone(title, text, warnings = []) {
+      el('formArea').style.display = 'none';
+      el('doneArea').style.display = 'block';
+      el('doneTitle').textContent = title;
+      el('doneText').textContent = text;
+      el('doneWarnings').innerHTML = warnings.map((w) => `<div class="warning-text">⚠ ${w}</div>`).join('');
     }
 
     async function checkCnpj() {
@@ -214,12 +301,13 @@
         setMessage('✓ CNPJ válido.', 'success');
 
         if (result.exists) {
+          existingOrganization = result.organization;
           el('existingName').textContent = result.organization.name || 'Organização existente';
           el('existingId').textContent = `Organização #${result.organization.id}`;
           el('existingCard').style.display = 'block';
         } else {
           el('newCard').style.display = 'block';
-          el('companyName').focus();
+          el('legalName').focus();
         }
       } catch (error) {
         setMessage(error.message, 'error');
@@ -228,31 +316,84 @@
       }
     }
 
-    async function createOrLink() {
-      const name = el('companyName').value.trim();
-      if (!lastCnpj) return setMessage('Valide o CNPJ novamente.', 'error');
-      if (el('newCard').style.display === 'block' && !name) {
-        el('companyName').focus();
-        return;
+    async function linkExisting() {
+      if (!existingOrganization?.id) return setMessage('Valide o CNPJ novamente.', 'error');
+
+      setBusy(true, 'Vinculando organização existente ao negócio...');
+      try {
+        const result = await api('/api/link-existing', {
+          companyId,
+          dealId,
+          organizationId: existingOrganization.id
+        });
+        showDone(
+          'Empresa vinculada',
+          `${result.organization.name} (#${result.organization.id}) foi vinculada ao negócio #${result.dealId}.`
+        );
+      } catch (error) {
+        setMessage(error.message, 'error');
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    function validateNewForm() {
+      const required = [
+        ['legalName', 'Razão Social'],
+        ['contactName', 'Nome do contato'],
+        ['phone', 'Telefone'],
+        ['email', 'E-mail']
+      ];
+
+      for (const [id, label] of required) {
+        if (!el(id).value.trim()) {
+          el(id).focus();
+          setMessage(`Informe: ${label}.`, 'error');
+          return false;
+        }
       }
 
-      setBusy(true, 'Criando/vinculando organização...');
+      const email = el('email').value.trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        el('email').focus();
+        setMessage('Informe um e-mail válido.', 'error');
+        return false;
+      }
+      return true;
+    }
+
+    async function createCompanyContactAndLink() {
+      if (!lastCnpj) return setMessage('Valide o CNPJ novamente.', 'error');
+      if (!validateNewForm()) return;
+
+      setBusy(true, 'Criando organização, contato e vinculando ao negócio...');
       try {
-        const result = await api('/api/create-link', {
+        const result = await api('/api/create-company-contact-link', {
           companyId,
           dealId,
           cnpj: lastCnpj,
-          name
+          legalName: el('legalName').value,
+          tradeName: el('tradeName').value,
+          postalCode: el('postalCode').value,
+          state: el('state').value,
+          city: el('city').value,
+          addressLine: el('addressLine').value,
+          contactName: el('contactName').value,
+          phone: el('phone').value,
+          email: el('email').value
         });
 
-        el('formArea').style.display = 'none';
-        el('doneArea').style.display = 'block';
-        el('doneTitle').textContent = result.action === 'created_and_linked'
-          ? 'Empresa criada e vinculada'
-          : 'Empresa existente vinculada';
-        el('doneText').textContent = `${result.organization.name} (#${result.organization.id}) foi vinculada ao negócio #${result.dealId}.`;
+        showDone(
+          'Empresa e contato criados',
+          `${result.organization.name} (#${result.organization.id}) e ${result.person.name} (#${result.person.id}) foram vinculados ao negócio #${result.dealId}.`,
+          result.warnings || []
+        );
       } catch (error) {
         setMessage(error.message, 'error');
+        if (error.payload?.code === 'CNPJ_ALREADY_EXISTS') {
+          resetResult();
+          checkCnpj();
+        }
       } finally {
         setBusy(false);
       }
@@ -263,14 +404,16 @@
       resetResult();
       setMessage('');
     });
-
     el('cnpj').addEventListener('keydown', (event) => {
       if (event.key === 'Enter') checkCnpj();
     });
+    el('postalCode').addEventListener('input', (event) => {
+      event.target.value = formatCep(event.target.value);
+    });
 
     el('btnCheck').addEventListener('click', checkCnpj);
-    el('btnLink').addEventListener('click', createOrLink);
-    el('btnCreate').addEventListener('click', createOrLink);
+    el('btnLink').addEventListener('click', linkExisting);
+    el('btnCreate').addEventListener('click', createCompanyContactAndLink);
 
     (async function init() {
       el('dealInfo').textContent = dealId
@@ -283,7 +426,7 @@
       }
 
       try {
-        sdk = await new AppExtensionsSDK().initialize({ size: { width: 720, height: 610 } });
+        sdk = await new AppExtensionsSDK().initialize({ size: { width: 800, height: 780 } });
       } catch (error) {
         console.error('SDK Pipedrive:', error);
       }
