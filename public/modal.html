@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cadastrar / Vincular empresa</title>
+  <script src="https://cdn.jsdelivr.net/npm/@pipedrive/app-extensions-sdk@0/dist/index.umd.js"></script>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #ffffff;
+      --card: #f7f8fa;
+      --text: #22252a;
+      --muted: #6b7280;
+      --border: #d6dae0;
+      --primary: #1f7a4d;
+      --primary-hover: #17623d;
+      --danger: #b42318;
+      --success: #137a45;
+      --warning-bg: #fff7e6;
+      --warning-border: #f2c46d;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .wrap { max-width: 680px; margin: 0 auto; }
+    h1 { font-size: 22px; margin: 0 0 5px; }
+    .sub { color: var(--muted); margin-bottom: 20px; font-size: 14px; }
+    .deal {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: 10px 12px;
+      margin-bottom: 18px;
+      font-size: 13px;
+    }
+    label { display: block; font-weight: 650; margin: 0 0 7px; font-size: 14px; }
+    input {
+      width: 100%;
+      height: 44px;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 0 12px;
+      font-size: 16px;
+      background: var(--bg);
+      color: var(--text);
+    }
+    input:focus { outline: 2px solid #2f80ed33; border-color: #2f80ed; }
+    .field { margin-bottom: 16px; }
+    .hint { color: var(--muted); margin-top: 6px; font-size: 12px; }
+    .message { min-height: 20px; margin: 8px 0 0; font-size: 13px; }
+    .error { color: var(--danger); }
+    .success { color: var(--success); }
+    .card {
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: 14px;
+      margin-top: 16px;
+      display: none;
+    }
+    .card.warning { background: var(--warning-bg); border-color: var(--warning-border); }
+    .org-name { font-weight: 700; margin: 4px 0; }
+    .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+    button {
+      min-height: 40px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      padding: 0 16px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    button.primary { background: var(--primary); color: white; }
+    button.primary:hover { background: var(--primary-hover); }
+    button.secondary { background: var(--bg); color: var(--text); border-color: var(--border); }
+    button:disabled { opacity: .55; cursor: wait; }
+    .spinner { display:none; color: var(--muted); margin-top: 10px; font-size: 13px; }
+    .done { display:none; text-align:center; padding: 30px 10px; }
+    .done .icon { font-size: 46px; }
+    .done h2 { margin: 8px 0; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div id="formArea">
+      <h1>Cadastrar / Vincular empresa</h1>
+      <div class="sub">Valide o CNPJ antes de criar uma nova organização.</div>
+
+      <div class="deal" id="dealInfo">Carregando contexto do negócio...</div>
+
+      <div class="field">
+        <label for="cnpj">CNPJ *</label>
+        <input id="cnpj" type="text" maxlength="18" autocomplete="off" placeholder="00.000.000/0000-00" />
+        <div class="hint">Aceita CNPJ numérico e o novo CNPJ alfanumérico.</div>
+        <div class="message" id="message"></div>
+      </div>
+
+      <div class="actions" id="checkActions">
+        <button class="primary" id="btnCheck">Validar CNPJ</button>
+      </div>
+
+      <div class="card warning" id="existingCard">
+        <div>⚠️ Este CNPJ já está cadastrado.</div>
+        <div class="org-name" id="existingName"></div>
+        <div class="hint" id="existingId"></div>
+        <div class="actions">
+          <button class="primary" id="btnLink">Vincular ao negócio</button>
+        </div>
+      </div>
+
+      <div class="card" id="newCard">
+        <div class="success">✓ CNPJ válido e não localizado no Pipedrive.</div>
+        <div class="field" style="margin-top:14px">
+          <label for="companyName">Razão Social *</label>
+          <input id="companyName" type="text" maxlength="255" autocomplete="off" />
+        </div>
+        <div class="actions">
+          <button class="primary" id="btnCreate">Criar e vincular</button>
+        </div>
+      </div>
+
+      <div class="spinner" id="spinner">Processando...</div>
+    </div>
+
+    <div class="done" id="doneArea">
+      <div class="icon">✅</div>
+      <h2 id="doneTitle">Concluído</h2>
+      <p id="doneText"></p>
+      <p class="hint">Você pode fechar esta janela e continuar no negócio.</p>
+    </div>
+  </div>
+
+  <script>
+    let sdk = null;
+    let lastCnpj = '';
+
+    const params = new URLSearchParams(window.location.search);
+    const companyId = params.get('companyId') || '';
+    const dealId = (params.get('selectedIds') || '').split(',')[0].trim();
+    const initialToken = params.get('token') || '';
+
+    const el = (id) => document.getElementById(id);
+
+    function normalizeCnpj(value) {
+      return String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 14);
+    }
+
+    function formatCnpj(value) {
+      const v = normalizeCnpj(value);
+      const p1 = v.slice(0, 2);
+      const p2 = v.slice(2, 5);
+      const p3 = v.slice(5, 8);
+      const p4 = v.slice(8, 12);
+      const p5 = v.slice(12, 14);
+      let out = p1;
+      if (v.length > 2) out += '.' + p2;
+      if (v.length > 5) out += '.' + p3;
+      if (v.length > 8) out += '/' + p4;
+      if (v.length > 12) out += '-' + p5;
+      return out;
+    }
+
+    function setBusy(busy, text = 'Processando...') {
+      el('spinner').style.display = busy ? 'block' : 'none';
+      el('spinner').textContent = text;
+      ['btnCheck', 'btnLink', 'btnCreate'].forEach((id) => el(id).disabled = busy);
+    }
+
+    function setMessage(text, type = '') {
+      el('message').textContent = text;
+      el('message').className = 'message ' + type;
+    }
+
+    function resetResult() {
+      el('existingCard').style.display = 'none';
+      el('newCard').style.display = 'none';
+      lastCnpj = '';
+    }
+
+    async function api(url, payload) {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-pipedrive-token': initialToken
+        },
+        body: JSON.stringify(payload)
+      });
+      const json = await response.json().catch(() => ({ ok:false, error:'Resposta inválida do servidor.' }));
+      if (!response.ok || json.ok === false) throw new Error(json.error || `HTTP ${response.status}`);
+      return json;
+    }
+
+    async function checkCnpj() {
+      resetResult();
+      setMessage('');
+      const cnpj = normalizeCnpj(el('cnpj').value);
+
+      if (cnpj.length !== 14) {
+        setMessage('Informe as 14 posições do CNPJ.', 'error');
+        return;
+      }
+
+      setBusy(true, 'Validando CNPJ e consultando o Pipedrive...');
+      try {
+        const result = await api('/api/check-cnpj', { companyId, cnpj });
+        lastCnpj = result.cnpj;
+        el('cnpj').value = result.formattedCnpj;
+        setMessage('✓ CNPJ válido.', 'success');
+
+        if (result.exists) {
+          el('existingName').textContent = result.organization.name || 'Organização existente';
+          el('existingId').textContent = `Organização #${result.organization.id}`;
+          el('existingCard').style.display = 'block';
+        } else {
+          el('newCard').style.display = 'block';
+          el('companyName').focus();
+        }
+      } catch (error) {
+        setMessage(error.message, 'error');
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function createOrLink() {
+      const name = el('companyName').value.trim();
+      if (!lastCnpj) return setMessage('Valide o CNPJ novamente.', 'error');
+      if (el('newCard').style.display === 'block' && !name) {
+        el('companyName').focus();
+        return;
+      }
+
+      setBusy(true, 'Criando/vinculando organização...');
+      try {
+        const result = await api('/api/create-link', {
+          companyId,
+          dealId,
+          cnpj: lastCnpj,
+          name
+        });
+
+        el('formArea').style.display = 'none';
+        el('doneArea').style.display = 'block';
+        el('doneTitle').textContent = result.action === 'created_and_linked'
+          ? 'Empresa criada e vinculada'
+          : 'Empresa existente vinculada';
+        el('doneText').textContent = `${result.organization.name} (#${result.organization.id}) foi vinculada ao negócio #${result.dealId}.`;
+      } catch (error) {
+        setMessage(error.message, 'error');
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    el('cnpj').addEventListener('input', (event) => {
+      event.target.value = formatCnpj(event.target.value);
+      resetResult();
+      setMessage('');
+    });
+
+    el('cnpj').addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') checkCnpj();
+    });
+
+    el('btnCheck').addEventListener('click', checkCnpj);
+    el('btnLink').addEventListener('click', createOrLink);
+    el('btnCreate').addEventListener('click', createOrLink);
+
+    (async function init() {
+      el('dealInfo').textContent = dealId
+        ? `Negócio atual: #${dealId}`
+        : 'Negócio não identificado. Abra o modal a partir dos detalhes de um negócio.';
+
+      if (!companyId || !dealId || !initialToken) {
+        setMessage('Contexto do Pipedrive incompleto. Abra este formulário pelo menu de ações do Deal.', 'error');
+        el('btnCheck').disabled = true;
+      }
+
+      try {
+        sdk = await new AppExtensionsSDK().initialize({ size: { width: 720, height: 610 } });
+      } catch (error) {
+        console.error('SDK Pipedrive:', error);
+      }
+    })();
+  </script>
+</body>
+</html>
