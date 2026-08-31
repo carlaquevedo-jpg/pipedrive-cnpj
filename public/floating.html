@@ -151,11 +151,34 @@
   function formatCep(value){const v=String(value||'').replace(/\D/g,'').slice(0,8);return v.length>5?v.slice(0,5)+'-'+v.slice(5):v}
   function escapeHtml(value){return String(value||'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;')}
   function setMessage(text='',type=''){el('message').textContent=text;el('message').className='message '+type}
+  let busyDepth = 0;
   function setBusy(on,text='Processando...'){
-    el('busy').style.display=on?'block':'none';el('busy').textContent=text;
+    if(on){
+      busyDepth++;
+      el('busy').style.display='block';
+      el('busy').textContent=text;
+      // Salva o estado original somente na primeira operação ocupada.
+      // Isso evita que chamadas assíncronas aninhadas gravem um botão já
+      // desabilitado como se esse fosse o estado original.
+      if(busyDepth===1){
+        document.querySelectorAll('button').forEach(b=>{
+          b.dataset.preBusyDisabled=b.disabled?'1':'0';
+          b.disabled=true;
+        });
+      }
+      return;
+    }
+
+    busyDepth=Math.max(0,busyDepth-1);
+    if(busyDepth>0)return;
+
+    el('busy').style.display='none';
+    el('busy').textContent='';
     document.querySelectorAll('button').forEach(b=>{
-      if(on){b.dataset.preBusyDisabled=b.disabled?'1':'0';b.disabled=true;}
-      else if(b.dataset.preBusyDisabled!=null){b.disabled=b.dataset.preBusyDisabled==='1';delete b.dataset.preBusyDisabled;}
+      if(b.dataset.preBusyDisabled!=null){
+        b.disabled=b.dataset.preBusyDisabled==='1';
+        delete b.dataset.preBusyDisabled;
+      }
     });
   }
   function resetPanels(){['existingCard','contactCard','registryCard','registryUnavailableCard','newCard','readyCard'].forEach(id=>el(id).style.display='none');selectedOrganization=null;selectedPerson=null;readyOrganization=null;readyPerson=null;existingOrganizations=[];existingPersons=[];registryAllowsCreation=false}
@@ -239,7 +262,18 @@
     return true;
   }
 
-  function markReady(org,person){readyOrganization=org;readyPerson=person;el('readyOrg').textContent=`${org.name} (#${org.id})`;el('readyPerson').textContent=`${person.name} (#${person.id})`;el('readyCard').style.display='block';el('readyCard').scrollIntoView({behavior:'smooth',block:'nearest'});setMessage('✓ Empresa e contato prontos.','success')}
+  function markReady(org,person){
+    readyOrganization=org;
+    readyPerson=person;
+    el('readyOrg').textContent=`${org.name} (#${org.id})`;
+    el('readyPerson').textContent=`${person.name} (#${person.id})`;
+    el('readyCard').style.display='block';
+    // Se não houver operação em andamento, garante que o botão fique disponível.
+    // O setBusy restaurará o estado correto ao finalizar uma operação aninhada.
+    if(busyDepth===0)el('btnOpenDeal').disabled=false;
+    el('readyCard').scrollIntoView({behavior:'smooth',block:'nearest'});
+    setMessage('✓ Empresa e contato prontos.','success');
+  }
 
   async function createExistingContact(){
     if(!selectedOrganization)return setMessage('Selecione uma organização.','error');if(!validContact(true))return;

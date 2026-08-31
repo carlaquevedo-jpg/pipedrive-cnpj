@@ -84,6 +84,11 @@ Teste:
 
 O retorno deve conter:
 
-`"version":"5.0.0"`
+`"version":"5.1.0"`
 
 Não é necessário mudar OAuth callback, banco ou variáveis já existentes.
+
+
+## Correção v5.1
+
+Corrige o estado dos botões durante chamadas assíncronas aninhadas na janela flutuante. Em alguns fluxos com organização/contato já existentes, o botão **Abrir novo negócio** permanecia desabilitado mesmo após o cliente estar pronto.

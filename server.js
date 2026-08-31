@@ -690,7 +690,7 @@ app.get('/health', async (_req, res) => {
     database,
     pipedriveConfigured: Boolean(CLIENT_ID && CLIENT_SECRET && CALLBACK_URL),
     callbackUrl: CALLBACK_URL || null,
-    version: '5.0.0'
+    version: '5.1.0'
   });
 });
 
