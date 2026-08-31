@@ -145,6 +145,8 @@
   let selectedPerson = null;
   let readyOrganization = null;
   let readyPerson = null;
+  let dealModalOpen = false;
+  let createdDealId = null;
 
   function normalizeCnpj(value){return String(value||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,14)}
   function formatCnpj(value){const v=normalizeCnpj(value);if(v.length<3)return v;let out=v.slice(0,2);if(v.length>2)out+='.'+v.slice(2,5);if(v.length>5)out+='.'+v.slice(5,8);if(v.length>8)out+='/'+v.slice(8,12);if(v.length>12)out+='-'+v.slice(12,14);return out}
@@ -181,7 +183,13 @@
       }
     });
   }
-  function resetPanels(){['existingCard','contactCard','registryCard','registryUnavailableCard','newCard','readyCard'].forEach(id=>el(id).style.display='none');selectedOrganization=null;selectedPerson=null;readyOrganization=null;readyPerson=null;existingOrganizations=[];existingPersons=[];registryAllowsCreation=false}
+  function resetPanels(){
+    ['existingCard','contactCard','registryCard','registryUnavailableCard','newCard','readyCard'].forEach(id=>el(id).style.display='none');
+    selectedOrganization=null;selectedPerson=null;readyOrganization=null;readyPerson=null;existingOrganizations=[];existingPersons=[];registryAllowsCreation=false;
+    dealModalOpen=false;createdDealId=null;
+    const b=el('btnOpenDeal');
+    if(b){b.disabled=true;b.textContent=b.dataset.originalText||'Abrir novo negócio'}
+  }
 
   async function getFreshToken(){
     if(sdk){
@@ -295,15 +303,47 @@
 
   async function openDeal(){
     if(!sdk||!readyOrganization||!readyPerson)return setMessage('Cliente ainda não está pronto.','error');
-    setMessage('Abrindo cadastro nativo do negócio...','success');
+    if(createdDealId)return setMessage(`O negócio #${createdDealId} já foi criado. Abra-o no Pipedrive para continuar.`,'success');
+    if(dealModalOpen)return setMessage('O cadastro de negócio já está aberto. Conclua ou feche a janela nativa antes de tentar novamente.','');
+
+    const button=el('btnOpenDeal');
+    dealModalOpen=true;
+    button.dataset.originalText=button.dataset.originalText||button.textContent;
+    button.disabled=true;
+    button.textContent='Cadastro aberto no Pipedrive...';
+    setMessage('Abrindo cadastro nativo do negócio. Clique em Salvar apenas uma vez e aguarde a conclusão.','success');
+
     try{
-      const result=await sdk.execute(AppExtensionsSDK.Command.OPEN_MODAL,{type:AppExtensionsSDK.Modal.DEAL,prefill:{title:readyOrganization.name,organization:readyOrganization.name,person:readyPerson.name}});
+      const result=await sdk.execute(AppExtensionsSDK.Command.OPEN_MODAL,{
+        type:AppExtensionsSDK.Modal.DEAL,
+        prefill:{
+          title:readyOrganization.name,
+          organization:readyOrganization.name,
+          person:readyPerson.name
+        }
+      });
+
       if(result?.status==='submitted'&&result?.id){
+        createdDealId=result.id;
+        button.disabled=true;
+        button.textContent=`Negócio #${result.id} criado`;
+        setMessage(`✓ Negócio #${result.id} criado. Abrindo o negócio...`,'success');
         try{await sdk.execute(AppExtensionsSDK.Command.SHOW_SNACKBAR,{message:`Negócio #${result.id} criado com sucesso.`})}catch(_){ }
+        try{await sdk.execute(AppExtensionsSDK.Command.REDIRECT_TO,{view:AppExtensionsSDK.View.DEALS,id:result.id})}catch(_){ }
         try{await sdk.execute(AppExtensionsSDK.Command.HIDE_FLOATING_WINDOW)}catch(_){ }
-        await sdk.execute(AppExtensionsSDK.Command.REDIRECT_TO,{view:AppExtensionsSDK.View.DEALS,id:result.id});
-      }else{setMessage('Cadastro do negócio fechado sem salvar. O cliente continua pronto para tentar novamente.','')}
-    }catch(e){setMessage('Não foi possível abrir o cadastro do negócio: '+e.message,'error')}
+        return;
+      }
+
+      setMessage('Cadastro do negócio fechado sem salvar. O cliente continua pronto para tentar novamente.','');
+    }catch(e){
+      setMessage('Não foi possível abrir o cadastro do negócio: '+e.message,'error');
+    }finally{
+      dealModalOpen=false;
+      if(!createdDealId){
+        button.disabled=false;
+        button.textContent=button.dataset.originalText||'Abrir novo negócio';
+      }
+    }
   }
 
   el('cnpj').addEventListener('input',ev=>{ev.target.value=formatCnpj(ev.target.value);resetPanels();setMessage('')});el('cnpj').addEventListener('keydown',ev=>{if(ev.key==='Enter')checkCnpj()});el('postalCode').addEventListener('input',ev=>ev.target.value=formatCep(ev.target.value));

@@ -1,6 +1,6 @@
 {
   "name": "pipedrive-cnpj-mvp",
-  "version": "5.1.0",
+  "version": "5.2.0",
   "private": true,
   "description": "MVP de cadastro de cliente por CNPJ antes da criação do Deal no Pipedrive",
   "main": "server.js",

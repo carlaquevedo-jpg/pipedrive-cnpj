@@ -490,7 +490,10 @@ async function lookupBrasilApiCnpj(rawCnpj) {
 
   try {
     const response = await fetch(`${BRASIL_API_CNPJ_URL}/${encodeURIComponent(cnpj)}`, {
-      headers: { Accept: 'application/json' },
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'Pipedrive-CNPJ/5.2'
+      },
       signal: controller.signal
     });
 
@@ -505,10 +508,19 @@ async function lookupBrasilApiCnpj(rawCnpj) {
     }
 
     if (!response.ok) {
+      const objectError = data?.error && typeof data.error === 'object'
+        ? (data.error.message || data.error.description || JSON.stringify(data.error))
+        : null;
+      const warning = typeof data?.message === 'string'
+        ? data.message
+        : (typeof data?.error === 'string'
+          ? data.error
+          : (objectError || `BrasilAPI indisponível (HTTP ${response.status}).`));
+
       return {
         found: false,
         unavailable: true,
-        warning: data?.message || data?.error || `BrasilAPI indisponível (HTTP ${response.status}).`
+        warning
       };
     }
 
@@ -690,7 +702,7 @@ app.get('/health', async (_req, res) => {
     database,
     pipedriveConfigured: Boolean(CLIENT_ID && CLIENT_SECRET && CALLBACK_URL),
     callbackUrl: CALLBACK_URL || null,
-    version: '5.1.0'
+    version: '5.2.0'
   });
 });
 

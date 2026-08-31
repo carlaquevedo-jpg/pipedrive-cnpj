@@ -84,7 +84,7 @@ Teste:
 
 O retorno deve conter:
 
-`"version":"5.1.0"`
+`"version":"5.2.0"`
 
 Não é necessário mudar OAuth callback, banco ou variáveis já existentes.
 
@@ -92,3 +92,13 @@ Não é necessário mudar OAuth callback, banco ou variáveis já existentes.
 ## Correção v5.1
 
 Corrige o estado dos botões durante chamadas assíncronas aninhadas na janela flutuante. Em alguns fluxos com organização/contato já existentes, o botão **Abrir novo negócio** permanecia desabilitado mesmo após o cliente estar pronto.
+
+
+## Correção v5.2
+
+- Impede múltiplos cliques em **Abrir novo negócio** enquanto o modal nativo do Pipedrive já está aberto.
+- Depois que o SDK retorna `status=submitted` e o ID do Deal, mantém o botão bloqueado, mostra o ID criado, redireciona para o Deal e oculta a janela flutuante.
+- Se o usuário fechar o modal nativo sem salvar, o botão é liberado novamente.
+- A consulta à BrasilAPI envia `User-Agent` e transforma erros estruturados em texto legível, evitando `[object Object]`.
+
+Observação: o SDK do Pipedrive não oferece um comando para fechar programaticamente o modal **nativo** de Deal; `CLOSE_MODAL` se aplica apenas a custom modals. Por isso a proteção é feita evitando abertura duplicada e reagindo ao retorno `submitted` do próprio modal nativo.
