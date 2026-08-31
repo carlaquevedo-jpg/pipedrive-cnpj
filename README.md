@@ -1,82 +1,81 @@
-# Pipedrive CNPJ MVP v2
+# Pipedrive CNPJ MVP v4
 
-MVP para uso em **Custom Modal > Deal details** no Pipedrive.
+Esta versão mantém o fluxo da v3 e passa a **gravar automaticamente os dados cadastrais da BrasilAPI nos campos personalizados da Organização**.
+
+## Campos personalizados esperados na Organização
+
+Crie com estes nomes:
+
+- `CNPJ` — Texto
+- `Nome Fantasia` — Texto
+- `Situação Cadastral` — Opção única
+- `Data Situação Cadastral` — Data
+- `CNAE Principal` — Texto ou Texto longo
+- `Descrição CNAE Principal` — Texto longo
+- `Natureza Jurídica` — Texto longo
+- `Quadro Societário (QSA)` — Texto longo
+
+### Opções do campo Situação Cadastral
+
+Cadastre pelo menos:
+
+- ATIVA
+- BAIXADA
+- INAPTA
+- SUSPENSA
+- NULA
+
+A integração procura a opção pelo texto e grava o **ID da opção** no Pipedrive.
+
+## O que a v4 grava
+
+BrasilAPI -> Organização no Pipedrive:
+
+- `razao_social` -> Nome da Organização
+- `nome_fantasia` -> Nome Fantasia
+- `descricao_situacao_cadastral` -> Situação Cadastral
+- `data_situacao_cadastral` -> Data Situação Cadastral
+- `cnae_fiscal` -> CNAE Principal
+- `cnae_fiscal_descricao` -> Descrição CNAE Principal
+- `natureza_juridica` -> Natureza Jurídica
+- `qsa[]` -> Quadro Societário (QSA)
+- CEP / endereço / município / UF -> endereço padrão da Organização
+
+O QSA é gravado em formato legível, uma linha por sócio/administrador:
+`NOME — QUALIFICAÇÃO — Entrada: DD/MM/AAAA`
 
 ## Fluxo
 
-1. Usuário abre um Deal e escolhe **Cadastrar / Vincular empresa**.
-2. Informa o CNPJ.
-3. O backend valida o DV e pesquisa Organizações no Pipedrive.
-4. Se o CNPJ já existir, a Organização existente é vinculada ao Deal.
-5. Se não existir, o modal solicita:
-   - Razão Social
-   - Nome Fantasia (opcional)
-   - CEP, Cidade, UF e Endereço (opcionais)
-   - Nome do contato
-   - Telefone
-   - E-mail
-6. O backend cria a Organização, cria a Pessoa vinculada à Organização e atualiza o Deal com `org_id` e `person_id`.
+1. Valida CNPJ numérico ou alfanumérico.
+2. Procura duplicidade no Pipedrive.
+3. Se existir, mostra as Organizações encontradas para seleção e vínculo.
+4. Se não existir, consulta BrasilAPI.
+5. Se a situação não for `ATIVA`, bloqueia a criação.
+6. Se estiver `ATIVA`, preenche os dados.
+7. Cria Organização + Pessoa/Contato e vincula ambos ao Deal.
+8. Grava os campos cadastrais personalizados acima.
 
-## Correção incluída para `Scope and URL mismatch`
+Se algum campo personalizado ou opção da Situação Cadastral não for encontrado, a criação continua e o modal mostra um aviso.
 
-A busca por CNPJ agora usa:
+## Atualização no Render
 
-`GET /api/v2/organizations/search?fields=custom_fields&exact_match=true`
+Substitua no repositório:
+- `server.js`
+- `public/modal.html`
+- `package.json`
+- `README.md`
 
-em vez de `/api/v2/itemSearch/field`.
+Depois:
+`Manual Deploy -> Deploy latest commit`
 
-Isso permite usar o scope `contacts:full` já concedido à app, sem depender de `search:read`.
+Teste:
+`https://SEU-SERVICO.onrender.com/health`
 
-## Scopes necessários no Pipedrive
+O retorno deve conter:
+`"version":"4.0.0"`
 
-- Deals: Full access
-- Contacts: Full access
+Não é necessário alterar OAuth callback, URL do iframe, banco ou as variáveis atuais do Render.
 
-`Contact Fields: Full access` não é necessário para este MVP, porque o app apenas lê as definições dos campos existentes.
+## URL do iframe
 
-## Campos
-
-### Organização
-
-- `name` = Razão Social
-- campo personalizado `CNPJ` = CNPJ normalizado, sem máscara
-- `address` = Endereço/CEP/Cidade/UF quando informados
-- `Nome Fantasia` = preenchido somente se existir um campo de Organização com esse nome
-
-### Pessoa
-
-- `name` = Nome do contato
-- `phones` = Telefone principal
-- `emails` = E-mail principal
-- `org_id` = Organização criada
-
-### Deal
-
-- `org_id` = Organização
-- `person_id` = Pessoa criada
-
-## Variáveis de ambiente
-
-- `PIPEDRIVE_CLIENT_ID`
-- `PIPEDRIVE_CLIENT_SECRET`
-- `PIPEDRIVE_CALLBACK_URL`
-- `DATABASE_URL`
-- `PIPEDRIVE_JWT_SECRET` (opcional)
-- `PIPEDRIVE_CNPJ_FIELD_KEY` (opcional)
-- `PIPEDRIVE_TRADE_NAME_FIELD_KEY` (opcional)
-
-## Deploy no Render
-
-Depois de atualizar os arquivos no GitHub, use:
-
-**Manual Deploy > Deploy latest commit**
-
-Confira:
-
-`https://pipedrive-cnpj.onrender.com/health`
-
-A resposta deve indicar `version: "2.0.0"`.
-
-A URL do Custom Modal continua:
-
-`https://pipedrive-cnpj.onrender.com/modal`
+`https://SEU-SERVICO.onrender.com/modal`

@@ -15,6 +15,7 @@ const CALLBACK_URL = process.env.PIPEDRIVE_CALLBACK_URL || '';
 const DATABASE_URL = process.env.DATABASE_URL || '';
 const CNPJ_FIELD_KEY_ENV = process.env.PIPEDRIVE_CNPJ_FIELD_KEY || '';
 const TRADE_NAME_FIELD_KEY_ENV = process.env.PIPEDRIVE_TRADE_NAME_FIELD_KEY || '';
+const BRASIL_API_CNPJ_URL = 'https://brasilapi.com.br/api/cnpj/v1';
 
 const pool = DATABASE_URL ? new Pool({ connectionString: DATABASE_URL }) : null;
 
@@ -232,6 +233,15 @@ async function getOrganizationFields(companyId) {
   return Array.isArray(fields.data) ? fields.data : [];
 }
 
+function organizationFieldName(field) {
+  return field?.name || field?.field_name || '';
+}
+
+function findOrganizationField(fields, acceptedNames) {
+  const accepted = new Set(acceptedNames.map(normalizeFieldName));
+  return fields.find((field) => accepted.has(normalizeFieldName(organizationFieldName(field)))) || null;
+}
+
 function fieldKey(field) {
   return field?.key || field?.code || field?.field_code || null;
 }
@@ -258,11 +268,138 @@ async function getTradeNameFieldKey(companyId) {
   if (TRADE_NAME_FIELD_KEY_ENV) return TRADE_NAME_FIELD_KEY_ENV;
 
   const list = await getOrganizationFields(companyId);
-  const accepted = new Set(['nomefantasia', 'fantasia']);
-  const candidate = list.find((f) => accepted.has(normalizeFieldName(f.name || f.field_name)))
-    || list.find((f) => normalizeFieldName(f.name || f.field_name).includes('nomefantasia'));
+  const candidate = findOrganizationField(list, ['Nome Fantasia', 'Fantasia'])
+    || list.find((f) => normalizeFieldName(organizationFieldName(f)).includes('nomefantasia'));
 
   return candidate ? fieldKey(candidate) : null;
+}
+
+function normalizeDateForPipedrive(value) {
+  const raw = clean(value, 40);
+  if (!raw) return '';
+
+  // BrasilAPI normalmente devolve YYYY-MM-DD.
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return raw;
+
+  // Fallback para DD/MM/YYYY.
+  const br = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (br) return `${br[3]}-${br[2]}-${br[1]}`;
+
+  return '';
+}
+
+function formatDateBr(value) {
+  const iso = normalizeDateForPipedrive(value);
+  if (!iso) return '';
+  const [year, month, day] = iso.split('-');
+  return `${day}/${month}/${year}`;
+}
+
+function formatQsa(qsa) {
+  if (!Array.isArray(qsa) || !qsa.length) return '';
+
+  return qsa
+    .map((item) => {
+      const name = clean(item?.nome_socio, 255);
+      if (!name) return null;
+
+      const qualification = clean(item?.qualificacao_socio, 180);
+      const entryDate = formatDateBr(item?.data_entrada_sociedade);
+
+      const parts = [name];
+      if (qualification) parts.push(qualification);
+      if (entryDate) parts.push(`Entrada: ${entryDate}`);
+
+      return parts.join(' — ');
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
+function resolveEnumOptionId(field, desiredLabel) {
+  if (!field || !desiredLabel) return null;
+  const desired = normalizeFieldName(desiredLabel);
+  const options = Array.isArray(field.options) ? field.options : [];
+
+  const found = options.find((option) => normalizeFieldName(option?.label) === desired);
+  return found?.id ?? null;
+}
+
+async function buildRegistryCustomFields(companyId, registryData) {
+  const fields = await getOrganizationFields(companyId);
+  const customFields = {};
+  const warnings = [];
+
+  const putText = (names, value) => {
+    const cleaned = clean(value, 65000);
+    if (!cleaned) return;
+
+    const field = findOrganizationField(fields, names);
+    const key = fieldKey(field);
+    if (!field || !key) {
+      warnings.push(`Campo "${names[0]}" não encontrado no Pipedrive.`);
+      return;
+    }
+    customFields[key] = cleaned;
+  };
+
+  const putDate = (names, value) => {
+    const normalized = normalizeDateForPipedrive(value);
+    if (!normalized) return;
+
+    const field = findOrganizationField(fields, names);
+    const key = fieldKey(field);
+    if (!field || !key) {
+      warnings.push(`Campo "${names[0]}" não encontrado no Pipedrive.`);
+      return;
+    }
+    customFields[key] = normalized;
+  };
+
+  const putEnum = async (names, label) => {
+    const cleaned = clean(label, 120).toUpperCase();
+    if (!cleaned) return;
+
+    let field = findOrganizationField(fields, names);
+    const key = fieldKey(field);
+    if (!field || !key) {
+      warnings.push(`Campo "${names[0]}" não encontrado no Pipedrive.`);
+      return;
+    }
+
+    // Algumas respostas resumidas da Fields API podem não trazer "options".
+    // Busca o campo individualmente antes de desistir.
+    if (!Array.isArray(field.options) || !field.options.length) {
+      try {
+        const details = await pipedriveRequest(
+          companyId,
+          `/api/v2/organizationFields/${encodeURIComponent(key)}`
+        );
+        if (details?.data) field = details.data;
+      } catch (_) {
+        // O warning abaixo explicará caso a opção realmente não seja localizada.
+      }
+    }
+
+    const optionId = resolveEnumOptionId(field, cleaned);
+    if (optionId == null) {
+      warnings.push(`A opção "${cleaned}" não existe no campo "${names[0]}".`);
+      return;
+    }
+
+    customFields[key] = optionId;
+  };
+
+  putText(['Nome Fantasia', 'Fantasia'], registryData?.tradeName);
+  await putEnum(['Situação Cadastral', 'Situacao Cadastral'], registryData?.registryStatus);
+  putDate(['Data Situação Cadastral', 'Data Situacao Cadastral'], registryData?.registryStatusDate);
+  putText(['CNAE Principal'], registryData?.cnae);
+  putText(['Descrição CNAE Principal', 'Descricao CNAE Principal'], registryData?.cnaeDescription);
+  putText(['Natureza Jurídica', 'Natureza Juridica'], registryData?.legalNature);
+  putText(['Quadro Societário (QSA)', 'Quadro Societario (QSA)', 'QSA'], registryData?.qsaText);
+
+  return { customFields, warnings };
 }
 
 function extractSearchItems(json) {
@@ -284,15 +421,14 @@ async function getOrganization(companyId, organizationId, cnpjFieldKey) {
   return json.data;
 }
 
-async function searchOrganizationByCnpj(companyId, rawCnpj) {
+async function searchOrganizationsByCnpj(companyId, rawCnpj) {
   const cnpj = normalizeCnpj(rawCnpj);
   const field = await getCnpjFieldKey(companyId);
   const formatted = formatCnpj(cnpj);
 
-  // IMPORTANTE: usa /organizations/search em vez de /itemSearch/field.
-  // O endpoint específico de organizações é coberto por contacts:read/full e evita
-  // o erro "Scope and URL mismatch" quando o app não tem search:read.
+  // Usa o endpoint específico de Organizações, coberto por contacts:read/full.
   const variants = [...new Set([cnpj, formatted, cnpj.toLowerCase(), formatted.toLowerCase()])];
+  const matches = new Map();
 
   for (const term of variants) {
     const params = new URLSearchParams({
@@ -307,22 +443,114 @@ async function searchOrganizationByCnpj(companyId, rawCnpj) {
 
     for (const item of list) {
       const id = searchResultId(item);
-      if (!id) continue;
+      if (!id || matches.has(String(id))) continue;
 
       const org = await getOrganization(companyId, id, field);
       const value = normalizeCnpj(org?.custom_fields?.[field] ?? '');
       if (value === cnpj) {
-        return {
+        matches.set(String(id), {
           id: Number(org.id),
           name: org.name,
           cnpj: value,
-          fieldKey: field
-        };
+          fieldKey: field,
+          address: org?.address?.value || org?.address || null
+        });
       }
     }
   }
 
-  return { id: null, name: null, cnpj, fieldKey: field };
+  return {
+    cnpj,
+    fieldKey: field,
+    organizations: [...matches.values()]
+  };
+}
+
+async function searchOrganizationByCnpj(companyId, rawCnpj) {
+  const result = await searchOrganizationsByCnpj(companyId, rawCnpj);
+  const first = result.organizations[0] || null;
+  return first
+    ? { ...first, fieldKey: result.fieldKey }
+    : { id: null, name: null, cnpj: result.cnpj, fieldKey: result.fieldKey };
+}
+
+function buildBrasilApiAddress(data) {
+  const parts = [];
+  if (data.logradouro) parts.push(clean(data.logradouro, 250));
+  if (data.numero) parts.push(clean(data.numero, 50));
+  if (data.bairro) parts.push(clean(data.bairro, 100));
+  if (data.complemento) parts.push(clean(data.complemento, 150));
+  return parts.filter(Boolean).join(', ');
+}
+
+async function lookupBrasilApiCnpj(rawCnpj) {
+  const cnpj = normalizeCnpj(rawCnpj);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+
+  try {
+    const response = await fetch(`${BRASIL_API_CNPJ_URL}/${encodeURIComponent(cnpj)}`, {
+      headers: { Accept: 'application/json' },
+      signal: controller.signal
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (response.status === 404) {
+      return {
+        found: false,
+        unavailable: false,
+        warning: 'CNPJ não localizado na base consultada pela BrasilAPI.'
+      };
+    }
+
+    if (!response.ok) {
+      return {
+        found: false,
+        unavailable: true,
+        warning: data?.message || data?.error || `BrasilAPI indisponível (HTTP ${response.status}).`
+      };
+    }
+
+    const status = clean(data.descricao_situacao_cadastral, 80).toUpperCase();
+    const phone = clean(data.ddd_telefone_1 || data.ddd_telefone_2, 100);
+    const email = normalizeEmail(data.email);
+
+    return {
+      found: true,
+      unavailable: false,
+      status,
+      active: status === 'ATIVA',
+      data: {
+        cnpj,
+        legalName: clean(data.razao_social, 255),
+        tradeName: clean(data.nome_fantasia, 255),
+        postalCode: clean(data.cep, 20),
+        state: clean(data.uf, 2).toUpperCase(),
+        city: clean(data.municipio, 100),
+        addressLine: buildBrasilApiAddress(data),
+        phone,
+        email,
+        cnae: data.cnae_fiscal ? String(data.cnae_fiscal) : '',
+        cnaeDescription: clean(data.cnae_fiscal_descricao, 255),
+        registryStatus: status,
+        registryStatusDate: clean(data.data_situacao_cadastral, 30),
+        registryReason: clean(data.descricao_motivo_situacao_cadastral, 255),
+        matrixBranch: clean(data.descricao_identificador_matriz_filial, 80),
+        legalNature: clean(data.natureza_juridica, 255),
+        qsaCount: Array.isArray(data.qsa) ? data.qsa.length : 0,
+        qsaText: formatQsa(data.qsa)
+      }
+    };
+  } catch (error) {
+    const message = error?.name === 'AbortError'
+      ? 'Tempo esgotado ao consultar a BrasilAPI.'
+      : `Não foi possível consultar a BrasilAPI: ${error.message || error}`;
+
+    return { found: false, unavailable: true, warning: message };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function clean(value, max = 255) {
@@ -339,7 +567,7 @@ function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-async function createOrganization(companyId, data, cnpj, cnpjFieldKey) {
+async function createOrganization(companyId, data, cnpj, cnpjFieldKey, registryData = null) {
   const legalName = clean(data.legalName);
   const tradeName = clean(data.tradeName);
   const addressLine = clean(data.addressLine, 500);
@@ -348,8 +576,29 @@ async function createOrganization(companyId, data, cnpj, cnpjFieldKey) {
   const state = clean(data.state, 100).toUpperCase();
 
   const customFields = { [cnpjFieldKey]: normalizeCnpj(cnpj) };
-  const tradeNameFieldKey = tradeName ? await getTradeNameFieldKey(companyId) : null;
-  if (tradeName && tradeNameFieldKey) customFields[tradeNameFieldKey] = tradeName;
+  const warnings = [];
+
+  // Na v4, quando a BrasilAPI respondeu, os dados cadastrais oficiais da consulta
+  // são usados para preencher os campos personalizados da Organização.
+  if (registryData) {
+    const registryFields = await buildRegistryCustomFields(companyId, registryData);
+    Object.assign(customFields, registryFields.customFields);
+    warnings.push(...registryFields.warnings);
+  } else {
+    // Fallback manual: ao menos tenta salvar Nome Fantasia.
+    const tradeNameFieldKey = tradeName ? await getTradeNameFieldKey(companyId) : null;
+    if (tradeName && tradeNameFieldKey) {
+      customFields[tradeNameFieldKey] = tradeName;
+    } else if (tradeName) {
+      warnings.push('Nome Fantasia não foi salvo porque o campo não foi encontrado.');
+    }
+  }
+
+  // Se a consulta não trouxe nome fantasia, preserva o valor confirmado pelo usuário.
+  if (tradeName && registryData && !registryData.tradeName) {
+    const tradeNameFieldKey = await getTradeNameFieldKey(companyId);
+    if (tradeNameFieldKey) customFields[tradeNameFieldKey] = tradeName;
+  }
 
   const body = {
     name: legalName,
@@ -373,7 +622,7 @@ async function createOrganization(companyId, data, cnpj, cnpjFieldKey) {
 
   return {
     organization: json.data,
-    tradeNameSaved: !tradeName || Boolean(tradeNameFieldKey)
+    warnings
   };
 }
 
@@ -441,7 +690,7 @@ app.get('/health', async (_req, res) => {
     database,
     pipedriveConfigured: Boolean(CLIENT_ID && CLIENT_SECRET && CALLBACK_URL),
     callbackUrl: CALLBACK_URL || null,
-    version: '2.0.0'
+    version: '4.0.0'
   });
 });
 
@@ -449,7 +698,7 @@ app.get('/', (_req, res) => {
   res.type('html').send(`<!doctype html>
   <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Pipedrive CNPJ MVP</title><style>body{font-family:Arial,sans-serif;max-width:720px;margin:60px auto;padding:0 24px;color:#252525}code{background:#f3f3f3;padding:3px 6px;border-radius:4px}</style></head>
-  <body><h1>Pipedrive CNPJ MVP v2</h1><p>Serviço online.</p><p>Modal: <code>/modal</code></p><p>OAuth callback: <code>/oauth/callback</code></p><p>Health: <code>/health</code></p></body></html>`);
+  <body><h1>Pipedrive CNPJ MVP v4</h1><p>Serviço online.</p><p>Modal: <code>/modal</code></p><p>OAuth callback: <code>/oauth/callback</code></p><p>Health: <code>/health</code></p></body></html>`);
 });
 
 app.get('/oauth/callback', async (req, res) => {
@@ -526,14 +775,35 @@ app.post('/api/check-cnpj', async (req, res) => {
       return res.status(422).json({ ok: false, error: 'CNPJ inválido.', cnpj });
     }
 
-    const existing = await searchOrganizationByCnpj(companyId, cnpj);
+    // Primeiro consulta o próprio Pipedrive. Se já existir, não desperdiça uma chamada externa.
+    const pipeResult = await searchOrganizationsByCnpj(companyId, cnpj);
+    if (pipeResult.organizations.length) {
+      return res.json({
+        ok: true,
+        valid: true,
+        exists: true,
+        cnpj,
+        formattedCnpj: formatCnpj(cnpj),
+        organizations: pipeResult.organizations.map((org) => ({
+          id: org.id,
+          name: org.name,
+          address: org.address || null
+        })),
+        registry: null
+      });
+    }
+
+    // Só consulta a BrasilAPI quando o CNPJ ainda não existe no Pipedrive.
+    const registry = await lookupBrasilApiCnpj(cnpj);
+
     return res.json({
       ok: true,
       valid: true,
-      exists: Boolean(existing.id),
+      exists: false,
       cnpj,
       formattedCnpj: formatCnpj(cnpj),
-      organization: existing.id ? { id: existing.id, name: existing.name } : null
+      organizations: [],
+      registry
     });
   } catch (error) {
     apiError(res, error);
@@ -594,13 +864,25 @@ app.post('/api/create-company-contact-link', async (req, res) => {
     if (validationError) return res.status(422).json({ ok: false, error: validationError });
 
     // Revalida no último instante para evitar duas telas criando o mesmo CNPJ.
-    const existing = await searchOrganizationByCnpj(companyId, cnpj);
-    if (existing.id) {
+    const existingResult = await searchOrganizationsByCnpj(companyId, cnpj);
+    if (existingResult.organizations.length) {
       return res.status(409).json({
         ok: false,
         code: 'CNPJ_ALREADY_EXISTS',
-        error: `Este CNPJ já pertence à organização ${existing.name || '#' + existing.id}. Revalide o CNPJ e vincule a organização existente.`,
-        organization: { id: existing.id, name: existing.name }
+        error: 'Este CNPJ já existe no Pipedrive. Revalide e selecione a organização existente.',
+        organizations: existingResult.organizations.map((org) => ({ id: org.id, name: org.name }))
+      });
+    }
+
+    // Se a BrasilAPI localizar o CNPJ e a situação não for ATIVA, bloqueia a criação.
+    // Se a API estiver indisponível ou ainda não localizar o CNPJ, o preenchimento manual continua possível.
+    const registryValidation = await lookupBrasilApiCnpj(cnpj);
+    if (registryValidation.found && !registryValidation.active) {
+      return res.status(422).json({
+        ok: false,
+        code: 'CNPJ_NOT_ACTIVE',
+        error: `CNPJ com situação cadastral ${registryValidation.status || 'NÃO ATIVA'}. O cadastro foi bloqueado.`,
+        registry: registryValidation
       });
     }
 
@@ -632,7 +914,13 @@ app.post('/api/create-company-contact-link', async (req, res) => {
     reservationMade = true;
 
     const cnpjFieldKey = await getCnpjFieldKey(companyId);
-    const createResult = await createOrganization(companyId, req.body, cnpj, cnpjFieldKey);
+    const createResult = await createOrganization(
+      companyId,
+      req.body,
+      cnpj,
+      cnpjFieldKey,
+      registryValidation.found ? registryValidation.data : null
+    );
     const organization = createResult.organization;
 
     // Registra o ID imediatamente para não perder a referência se a criação da Pessoa falhar.
@@ -659,7 +947,7 @@ app.post('/api/create-company-contact-link', async (req, res) => {
       organization: { id: Number(organization.id), name: organization.name },
       person: { id: Number(person.id), name: person.name },
       dealId: Number(dealId),
-      warnings: createResult.tradeNameSaved ? [] : ['Nome Fantasia não foi salvo porque não existe um campo de Organização chamado "Nome Fantasia".']
+      warnings: createResult.warnings || []
     });
   } catch (error) {
     if (reservationMade && pool && companyId && cnpj) {
@@ -678,7 +966,7 @@ app.post('/api/create-company-contact-link', async (req, res) => {
 initDb()
   .then(() => {
     app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Pipedrive CNPJ MVP v2 ouvindo na porta ${PORT}`);
+      console.log(`Pipedrive CNPJ MVP v4 ouvindo na porta ${PORT}`);
     });
   })
   .catch((error) => {

@@ -1,6 +1,6 @@
 {
   "name": "pipedrive-cnpj-mvp",
-  "version": "1.0.0",
+  "version": "4.0.0",
   "private": true,
   "description": "MVP de validação de CNPJ e vínculo de organização a Deal no Pipedrive",
   "main": "server.js",
