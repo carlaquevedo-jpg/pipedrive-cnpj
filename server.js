@@ -1146,7 +1146,7 @@ app.get('/health', async (_req, res) => {
     technicalOauthReady,
     technicalUserName,
     callbackUrl: CALLBACK_URL || null,
-    version: '6.3.0'
+    version: '6.3.1'
   });
 });
 
@@ -1154,7 +1154,7 @@ app.get('/', (_req, res) => {
   res.type('html').send(`<!doctype html>
   <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Pipedrive CNPJ MVP</title><style>body{font-family:Arial,sans-serif;max-width:720px;margin:60px auto;padding:0 24px;color:#252525}code{background:#f3f3f3;padding:3px 6px;border-radius:4px}</style></head>
-  <body><h1>Pipedrive CNPJ MVP v6.3.0</h1><p>Serviço online.</p><p>Janela flutuante: <code>/floating</code></p><p>Modal legado: <code>/modal</code></p><p>OAuth callback: <code>/oauth/callback</code></p><p>Health: <code>/health</code></p></body></html>`);
+  <body><h1>Pipedrive CNPJ MVP v6.3.1</h1><p>Serviço online.</p><p>Janela flutuante: <code>/floating</code></p><p>Modal legado: <code>/modal</code></p><p>OAuth callback: <code>/oauth/callback</code></p><p>Health: <code>/health</code></p></body></html>`);
 });
 
 app.get('/oauth/callback', async (req, res) => {
@@ -1716,6 +1716,46 @@ app.post('/api/create-client', async (req, res) => {
 });
 
 
+async function verifyDealCnpjBinding(companyId, organizationId, rawCnpj) {
+  const cnpj = normalizeCnpj(rawCnpj);
+  const orgId = Number(organizationId);
+  if (!isValidCnpj(cnpj) || !orgId) {
+    throw cnpjLockError('CNPJ_REQUIRED_FOR_DEAL', 'Revalide o CNPJ antes de criar o negócio.');
+  }
+
+  // Para criar o negócio não precisamos reler o campo CNPJ do Pipedrive quando
+  // o vínculo já foi estabelecido pelo próprio backend. Isso evita bloquear a
+  // criação do Deal por uma leitura adicional de custom_fields logo após criar
+  // Organização/Pessoa. A alteração de CNPJ continua protegida no cadastro,
+  // atualização cadastral e nas próximas consultas do CNPJ.
+  const boundOrg = await getCnpjBindingByOrganization(companyId, orgId);
+  if (boundOrg) {
+    const bound = normalizeCnpj(boundOrg.cnpj);
+    if (bound !== cnpj) {
+      throw cnpjLockError(
+        'ORG_CNPJ_LOCKED',
+        `A Organização #${orgId} está vinculada ao CNPJ ${formatCnpj(bound)} e não ao CNPJ ${formatCnpj(cnpj)}.`
+      );
+    }
+    return;
+  }
+
+  const boundCnpj = await getCnpjBindingByCnpj(companyId, cnpj);
+  if (boundCnpj?.organization_id) {
+    if (Number(boundCnpj.organization_id) !== orgId) {
+      throw cnpjLockError(
+        'CNPJ_BOUND_TO_OTHER_ORG',
+        `O CNPJ ${formatCnpj(cnpj)} já está vinculado à Organização #${boundCnpj.organization_id}.`
+      );
+    }
+    return;
+  }
+
+  // Organização antiga ainda não registrada no nosso controle: valida uma vez
+  // diretamente no Pipedrive e consolida o vínculo imutável no Postgres.
+  await verifyOrganizationCnpj(companyId, orgId, cnpj);
+}
+
 app.post('/api/create-deal', async (req, res) => {
   try {
     assertConfig();
@@ -1731,7 +1771,7 @@ app.post('/api/create-deal', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'companyId/organizationId/personId/CNPJ não informados ou inválidos.' });
     }
     validateCompanyAgainstToken(payload, companyId);
-    await verifyOrganizationCnpj(companyId, organizationId, cnpj);
+    await verifyDealCnpjBinding(companyId, organizationId, cnpj);
 
     const result = await createDealIdempotent(companyId, organizationId, personId, req.body, ownerId);
     if (!result.reused) {

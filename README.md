@@ -1,8 +1,16 @@
-# Pipedrive CNPJ MVP v6.3.0
+# Pipedrive CNPJ MVP v6.3.1
+
+## v6.3.1 — correção de criação do negócio
+
+- Corrige a regressão em que a Organização e a Pessoa eram criadas, mas o Deal podia parar na etapa “Cliente pronto”.
+- A criação do Deal usa o vínculo CNPJ ↔ Organização já consolidado pelo backend e não relê desnecessariamente o custom field imediatamente após o cadastro.
+- Mantém a proteção de CNPJ imutável nas consultas, criação e atualização cadastral.
+- Se o Deal falhar, a tela não duplica mais os dois formulários: mantém somente “Cliente pronto” e mostra o erro real para permitir nova tentativa.
+
 
 Esta versão parte da v6.2.1 e acrescenta governança de CNPJ e OAuth técnico.
 
-## v6.3.0 — principais mudanças
+## v6.3.1 — principais mudanças
 
 ### CNPJ imutável
 
