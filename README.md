@@ -1,6 +1,15 @@
-# Pipedrive CNPJ MVP v6.1.0
+# Pipedrive CNPJ MVP v6.2.0
 
 Esta versão parte da v6.0.0 e acrescenta os ajustes de proprietário e e-mail cadastral da Organização.
+
+
+## Ajuste da v6.2.0
+
+- Mantém a BrasilAPI como fonte principal.
+- Se a BrasilAPI devolver o campo `email` vazio/nulo, consulta a API pública do CNPJ.ws somente para recuperar o endereço eletrônico.
+- O fallback só é chamado quando necessário e não bloqueia o cadastro se estiver indisponível.
+- Caches de CNPJ das últimas 24h que ficaram sem e-mail também são enriquecidos automaticamente na próxima consulta.
+- A origem do e-mail fica disponível em `registry.data.emailSource` (`BrasilAPI` ou `CNPJ.ws`).
 
 ## Ajustes da v6.1.0
 
@@ -70,7 +79,7 @@ https://pipedrive-cnpj.onrender.com/health
 O retorno deve conter:
 
 ```json
-"version": "6.1.0"
+"version": "6.2.0"
 ```
 
 Não é necessário alterar a URL da janela flutuante no Developer Hub:

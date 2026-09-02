@@ -17,6 +17,7 @@ const CNPJ_FIELD_KEY_ENV = process.env.PIPEDRIVE_CNPJ_FIELD_KEY || '';
 const TRADE_NAME_FIELD_KEY_ENV = process.env.PIPEDRIVE_TRADE_NAME_FIELD_KEY || '';
 const ORG_EMAIL_FIELD_KEY_ENV = process.env.PIPEDRIVE_ORG_EMAIL_FIELD_KEY || '';
 const BRASIL_API_CNPJ_URL = 'https://brasilapi.com.br/api/cnpj/v1';
+const CNPJ_WS_PUBLIC_URL = 'https://publica.cnpj.ws/cnpj';
 
 const pool = DATABASE_URL ? new Pool({ connectionString: DATABASE_URL }) : null;
 
@@ -570,12 +571,68 @@ async function saveCachedBrasilApiCnpj(cnpj, payload) {
   );
 }
 
+async function lookupCnpjWsEmail(cnpj) {
+  // A API pública do CNPJ.ws atualmente trabalha com CNPJ numérico.
+  // Usamos apenas como fallback quando a BrasilAPI não devolve e-mail.
+  if (!/^\d{14}$/.test(cnpj)) return { email: '', source: '' };
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 6000);
+
+  try {
+    const response = await fetch(`${CNPJ_WS_PUBLIC_URL}/${encodeURIComponent(cnpj)}`, {
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'Pipedrive-CNPJ/6.2'
+      },
+      signal: controller.signal
+    });
+
+    if (!response.ok) return { email: '', source: '' };
+
+    const data = await response.json().catch(() => ({}));
+    const email = normalizeEmail(data?.estabelecimento?.email || '');
+    return {
+      email: isValidEmail(email) ? email : '',
+      source: email ? 'CNPJ.ws' : ''
+    };
+  } catch (_) {
+    // Fallback não pode impedir o cadastro caso o serviço esteja indisponível.
+    return { email: '', source: '' };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fillMissingRegistryEmail(cnpj, registry) {
+  if (!registry?.found || !registry?.data) return { registry, changed: false };
+
+  const currentEmail = normalizeEmail(registry.data.email || '');
+  if (isValidEmail(currentEmail)) {
+    registry.data.email = currentEmail;
+    registry.data.emailSource = registry.data.emailSource || 'BrasilAPI';
+    return { registry, changed: false };
+  }
+
+  const fallback = await lookupCnpjWsEmail(cnpj);
+  if (!fallback.email) return { registry, changed: false };
+
+  registry.data.email = fallback.email;
+  registry.data.emailSource = fallback.source;
+  return { registry, changed: true };
+}
+
 async function lookupBrasilApiCnpj(rawCnpj, { force = false } = {}) {
   const cnpj = normalizeCnpj(rawCnpj);
 
   if (!force) {
     const cached = await getCachedBrasilApiCnpj(cnpj);
-    if (cached) return cached;
+    if (cached) {
+      // Corrige também caches antigos que ficaram salvos sem e-mail.
+      const enriched = await fillMissingRegistryEmail(cnpj, cached);
+      if (enriched.changed) await saveCachedBrasilApiCnpj(cnpj, enriched.registry);
+      return enriched.registry;
+    }
   }
 
   const controller = new AbortController();
@@ -585,7 +642,7 @@ async function lookupBrasilApiCnpj(rawCnpj, { force = false } = {}) {
     const response = await fetch(`${BRASIL_API_CNPJ_URL}/${encodeURIComponent(cnpj)}`, {
       headers: {
         Accept: 'application/json',
-        'User-Agent': 'Pipedrive-CNPJ/6.1'
+        'User-Agent': 'Pipedrive-CNPJ/6.2'
       },
       signal: controller.signal
     });
@@ -621,7 +678,7 @@ async function lookupBrasilApiCnpj(rawCnpj, { force = false } = {}) {
     const phone = clean(data.ddd_telefone_1 || data.ddd_telefone_2, 100);
     const email = normalizeEmail(data.email);
 
-    const result = {
+    let result = {
       found: true,
       unavailable: false,
       status,
@@ -636,6 +693,7 @@ async function lookupBrasilApiCnpj(rawCnpj, { force = false } = {}) {
         addressLine: buildBrasilApiAddress(data),
         phone,
         email,
+        emailSource: email ? 'BrasilAPI' : '',
         cnae: data.cnae_fiscal ? String(data.cnae_fiscal) : '',
         cnaeDescription: clean(data.cnae_fiscal_descricao, 255),
         registryStatus: status,
@@ -647,6 +705,10 @@ async function lookupBrasilApiCnpj(rawCnpj, { force = false } = {}) {
         qsaText: formatQsa(data.qsa)
       }
     };
+
+    // Alguns CNPJs retornam email=null na BrasilAPI. Nesses casos, tenta
+    // uma segunda fonte pública/gratuita somente para o endereço eletrônico.
+    result = (await fillMissingRegistryEmail(cnpj, result)).registry;
 
     await saveCachedBrasilApiCnpj(cnpj, result);
     return result;
@@ -910,7 +972,7 @@ app.get('/health', async (_req, res) => {
     database,
     pipedriveConfigured: Boolean(CLIENT_ID && CLIENT_SECRET && CALLBACK_URL),
     callbackUrl: CALLBACK_URL || null,
-    version: '6.1.0'
+    version: '6.2.0'
   });
 });
 
@@ -918,7 +980,7 @@ app.get('/', (_req, res) => {
   res.type('html').send(`<!doctype html>
   <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Pipedrive CNPJ MVP</title><style>body{font-family:Arial,sans-serif;max-width:720px;margin:60px auto;padding:0 24px;color:#252525}code{background:#f3f3f3;padding:3px 6px;border-radius:4px}</style></head>
-  <body><h1>Pipedrive CNPJ MVP v6.1</h1><p>Serviço online.</p><p>Janela flutuante: <code>/floating</code></p><p>Modal legado: <code>/modal</code></p><p>OAuth callback: <code>/oauth/callback</code></p><p>Health: <code>/health</code></p></body></html>`);
+  <body><h1>Pipedrive CNPJ MVP v6.2</h1><p>Serviço online.</p><p>Janela flutuante: <code>/floating</code></p><p>Modal legado: <code>/modal</code></p><p>OAuth callback: <code>/oauth/callback</code></p><p>Health: <code>/health</code></p></body></html>`);
 });
 
 app.get('/oauth/callback', async (req, res) => {
