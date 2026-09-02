@@ -1,89 +1,85 @@
-# Pipedrive CNPJ MVP v6.2.0
+# Pipedrive CNPJ MVP v6.3.0
 
-Esta versão parte da v6.0.0 e acrescenta os ajustes de proprietário e e-mail cadastral da Organização.
+Esta versão parte da v6.2.1 e acrescenta governança de CNPJ e OAuth técnico.
 
+## v6.3.0 — principais mudanças
 
-## Ajuste da v6.2.0
+### CNPJ imutável
 
-- Mantém a BrasilAPI como fonte principal.
-- Se a BrasilAPI devolver o campo `email` vazio/nulo, consulta a API pública do CNPJ.ws somente para recuperar o endereço eletrônico.
-- O fallback só é chamado quando necessário e não bloqueia o cadastro se estiver indisponível.
-- Caches de CNPJ das últimas 24h que ficaram sem e-mail também são enriquecidos automaticamente na próxima consulta.
-- A origem do e-mail fica disponível em `registry.data.emailSource` (`BrasilAPI` ou `CNPJ.ws`).
+- O CNPJ é gravado somente na criação da Organização.
+- **Atualizar dados cadastrais** não envia mais o campo CNPJ no `PATCH`.
+- O Postgres mantém o vínculo `company_id + CNPJ -> organization_id`.
+- Se uma Organização já vinculada aparecer com outro CNPJ, o app bloqueia a operação e informa que o CNPJ foi alterado fora do fluxo validado.
+- Antes de criar contato ou negócio em uma Organização existente, o backend confirma que o CNPJ atual ainda é exatamente o CNPJ consultado.
+- Na janela flutuante, depois de uma consulta válida, o campo CNPJ fica somente leitura. O botão passa a ser **Nova consulta**.
 
-## Ajustes da v6.1.0
+> Importante: o backend impede que o nosso aplicativo aceite/troque um CNPJ já vinculado, mas não consegue impedir sozinho uma edição manual feita diretamente na tela do Pipedrive. Configure também o campo personalizado **CNPJ** como somente leitura para os conjuntos de permissão dos vendedores.
 
-- O **Proprietário** dos novos registros passa a ser o **usuário que está logado e abriu a extensão do Pipedrive**, usando o `userId` enviado pelo Custom Floating Window e o JWT assinado da extensão.
-- Ao criar uma empresa nova, o mesmo usuário é enviado como `owner_id` da **Organização**, da **Pessoa** e do **Negócio**.
-- Quando a BrasilAPI retorna o campo `email` (endereço eletrônico), ele passa a preencher **E-mail da organização** na tela.
-- O e-mail cadastral da empresa não é mais colocado automaticamente no e-mail do contato principal; o e-mail da Pessoa deve ser informado/confirmado separadamente.
-- Na Organização, o e-mail é salvo em um campo personalizado chamado **E-mail**, **Email** ou **Endereço Eletrônico**.
-- A ação **Atualizar dados cadastrais** também atualiza esse e-mail em Organizações já existentes.
+### OAuth técnico fixo
 
-> Observação: a API v2 de Organizações do Pipedrive não possui um campo nativo de e-mail. Crie um campo personalizado de Organização do tipo texto chamado `E-mail` ou `Endereço Eletrônico`. O app localiza esse campo automaticamente.
+- O token usado nas chamadas da API fica fixado no usuário técnico **Sistema Interno**.
+- O `owner_id` continua sendo o usuário que abriu a extensão, portanto o proprietário da Organização/Pessoa/Negócio permanece o vendedor logado.
+- Autorizações feitas depois por Carla, Milton ou outros usuários não substituem mais o OAuth técnico.
+- O histórico nativo de chamadas da API passa a ficar associado ao usuário técnico em vez de ao último usuário que autorizou o app.
+- O `/health` informa `technicalOauthReady` e `technicalUserName`.
 
-> Para atribuir `owner_id` a outro usuário, o usuário técnico/OAuth usado pelo backend precisa ter permissão para alterar o proprietário dos registros.
+### Auditoria própria
 
-## O que mudou
+A versão cria a tabela `app_audit_log`, registrando:
 
-- A janela flutuante sempre abre limpa ao ser exibida novamente.
-- A data da situação cadastral é mostrada ao usuário em `DD/MM/AAAA`.
-- O valor salvo no campo **Data Situação Cadastral** continua em `AAAA-MM-DD`, que é o formato exigido pelo Pipedrive.
-- Os dados da BrasilAPI são armazenados em cache no Postgres por 24 horas para que a criação da Organização use exatamente os dados que acabaram de ser consultados, evitando uma segunda consulta externa e perda dos dados por rate limit/indisponibilidade.
-- O mapeamento de campos personalizados aceita `field_code`, `key` ou `code` retornados pela API de campos do Pipedrive.
-- Foi incluída a ação **Atualizar dados cadastrais** para Organização já existente. Isso é útil para corrigir cadastros criados durante os testes anteriores.
-- O modal nativo **Adicionar negócio** não é mais usado. O SDK do Pipedrive só permite `CLOSE_MODAL` para modais personalizados, então não existe uma forma segura de fechar programaticamente o modal nativo após o primeiro Salvar.
-- O negócio agora é criado diretamente via `POST /api/v2/deals`.
-- A criação do negócio possui uma chave idempotente no Postgres. Repetir a mesma requisição não cria outro Deal.
-- Para empresa nova, o botão **Criar cliente e negócio** cria Organização, Pessoa e Deal em sequência.
-- Para empresa já existente, selecione/crie o contato e use **Criar negócio**.
-- Após criar o Deal, a janela flutuante é ocultada e o usuário é direcionado ao negócio criado.
+- usuário real que solicitou a ação (`actor_user_id`);
+- usuário técnico usado pela API (`technical_user_id`);
+- ação realizada;
+- tipo e ID da entidade;
+- CNPJ;
+- detalhes básicos da operação;
+- data/hora.
 
-## Campos personalizados da Organização esperados
+As ações auditadas incluem criação de Organização, Pessoa e Negócio e atualização cadastral.
 
-- CNPJ
-- Nome Fantasia
-- Situação Cadastral
-- Data Situação Cadastral
-- CNAE Principal
-- Descrição CNAE Principal
-- Natureza Jurídica
-- Quadro Societário (QSA)
-- E-mail (ou Endereço Eletrônico)
+## Passo obrigatório após o primeiro deploy da v6.3
 
-`Situação Cadastral` deve ser uma opção única contendo, conforme aplicável:
+As versões anteriores guardavam apenas um OAuth por empresa e esse token podia ter sido sobrescrito pelo último usuário que autorizou o app. Ao iniciar a v6.3, o registro antigo fica **não bloqueado**.
 
-- ATIVA
-- BAIXADA
-- INAPTA
-- SUSPENSA
-- NULA
+Faça nesta ordem:
 
-## Atualização no Render
-
-Substitua no repositório principalmente:
-
-- `server.js`
-- `package.json`
-- `public/floating.html`
-- `README.md`
-
-Depois faça `Manual Deploy -> Deploy latest commit`.
-
-Confirme:
-
-```text
-https://pipedrive-cnpj.onrender.com/health
-```
-
-O retorno deve conter:
+1. Suba a v6.3 e faça o deploy.
+2. Confirme `/health` com `"version":"6.3.0"` e `"technicalOauthReady":false`.
+3. **Antes de outro usuário autorizar/testar**, entre na sandbox como **Sistema Interno**.
+4. Autorize/instale o aplicativo novamente uma vez.
+5. Consulte `/health` de novo. Deve aparecer:
 
 ```json
-"version": "6.2.0"
+{
+  "technicalOauthReady": true,
+  "technicalUserName": "Sistema Interno",
+  "version": "6.3.0"
+}
 ```
 
-Não é necessário alterar a URL da janela flutuante no Developer Hub:
+Depois disso, autorizações de outros usuários não substituem mais o token técnico.
 
-```text
-https://pipedrive-cnpj.onrender.com/floating
-```
+## Bloquear edição manual do CNPJ no Pipedrive
+
+Além da proteção no código:
+
+1. Vá em **Campos de dados -> Organização -> CNPJ -> Editar**.
+2. Em especificações/permissões de usuário, retire a edição dos conjuntos usados pelos vendedores.
+3. Mantenha a permissão necessária apenas para administradores/integração conforme sua política.
+
+O campo fica visível, mas não editável para os usuários restritos.
+
+## Recursos preservados da v6.2.1
+
+- Proprietário = usuário logado.
+- E-mail cadastral da Organização em campo personalizado `E-mail`.
+- BrasilAPI como fonte principal e CNPJ.ws como fallback somente para endereço eletrônico.
+- Cache de CNPJ no Postgres.
+- Criação direta do Deal sem modal nativo.
+- Idempotência para não duplicar negócio.
+- Reset da janela flutuante ao reabrir.
+- Atualização cadastral de Organização existente.
+
+## Deploy
+
+Substitua os arquivos no repositório e faça `Manual Deploy -> Deploy latest commit`. Não é necessário alterar a URL da janela flutuante no Developer Hub.

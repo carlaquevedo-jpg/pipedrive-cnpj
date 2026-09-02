@@ -16,6 +16,7 @@ const DATABASE_URL = process.env.DATABASE_URL || '';
 const CNPJ_FIELD_KEY_ENV = process.env.PIPEDRIVE_CNPJ_FIELD_KEY || '';
 const TRADE_NAME_FIELD_KEY_ENV = process.env.PIPEDRIVE_TRADE_NAME_FIELD_KEY || '';
 const ORG_EMAIL_FIELD_KEY_ENV = process.env.PIPEDRIVE_ORG_EMAIL_FIELD_KEY || '';
+const TECHNICAL_USER_NAME = process.env.PIPEDRIVE_TECHNICAL_USER_NAME || 'Sistema Interno';
 const BRASIL_API_CNPJ_URL = 'https://brasilapi.com.br/api/cnpj/v1';
 const CNPJ_WS_PUBLIC_URL = 'https://publica.cnpj.ws/cnpj';
 
@@ -47,6 +48,12 @@ async function initDb() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+
+  // v6.3: o OAuth usado nas chamadas da API fica preso ao usuário técnico.
+  // Colunas adicionadas com ALTER para também atualizar bancos criados por versões anteriores.
+  await pool.query(`ALTER TABLE pipedrive_oauth ADD COLUMN IF NOT EXISTS technical_locked BOOLEAN NOT NULL DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE pipedrive_oauth ADD COLUMN IF NOT EXISTS technical_user_name TEXT`);
+  await pool.query(`ALTER TABLE pipedrive_oauth ADD COLUMN IF NOT EXISTS technical_user_email TEXT`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS cnpj_registry (
@@ -80,6 +87,24 @@ async function initDb() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS app_audit_log (
+      id BIGSERIAL PRIMARY KEY,
+      company_id BIGINT NOT NULL,
+      actor_user_id BIGINT,
+      technical_user_id BIGINT,
+      action VARCHAR(80) NOT NULL,
+      entity_type VARCHAR(40),
+      entity_id BIGINT,
+      cnpj VARCHAR(14),
+      details JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_app_audit_company_created ON app_audit_log(company_id, created_at DESC)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_app_audit_cnpj ON app_audit_log(company_id, cnpj)`);
 }
 
 function normalizeCnpj(value) {
@@ -223,15 +248,52 @@ async function getOauth(companyId) {
 
   const result = await pool.query('SELECT * FROM pipedrive_oauth WHERE company_id = $1', [companyId]);
   if (!result.rows.length) {
-    const err = new Error('Aplicativo ainda não está autorizado para esta empresa do Pipedrive.');
-    err.status = 401;
+    const err = new Error(`OAuth técnico ainda não configurado. Entre no Pipedrive como "${TECHNICAL_USER_NAME}" e autorize o aplicativo uma vez.`);
+    err.status = 503;
+    err.code = 'TECHNICAL_OAUTH_REQUIRED';
     throw err;
   }
 
   let row = result.rows[0];
+  if (!row.technical_locked) {
+    const err = new Error(`OAuth técnico ainda não fixado. Entre no Pipedrive como "${TECHNICAL_USER_NAME}" e autorize o aplicativo antes dos demais usuários.`);
+    err.status = 503;
+    err.code = 'TECHNICAL_OAUTH_REQUIRED';
+    throw err;
+  }
+
   const expires = new Date(row.expires_at).getTime();
   if (expires <= Date.now() + 120000) row = await refreshOauth(row);
   return row;
+}
+
+async function writeAudit({ companyId, actorUserId = null, action, entityType = null, entityId = null, cnpj = '', details = {} }) {
+  if (!pool || !companyId || !action) return;
+  try {
+    const tech = await pool.query(
+      'SELECT user_id FROM pipedrive_oauth WHERE company_id=$1 AND technical_locked=TRUE',
+      [companyId]
+    );
+    const technicalUserId = tech.rows[0]?.user_id || null;
+    await pool.query(
+      `INSERT INTO app_audit_log
+        (company_id, actor_user_id, technical_user_id, action, entity_type, entity_id, cnpj, details, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,NOW())`,
+      [
+        companyId,
+        actorUserId ? Number(actorUserId) : null,
+        technicalUserId ? Number(technicalUserId) : null,
+        clean(action, 80),
+        entityType ? clean(entityType, 40) : null,
+        entityId ? Number(entityId) : null,
+        normalizeCnpj(cnpj) || null,
+        JSON.stringify(details || {})
+      ]
+    );
+  } catch (error) {
+    // Auditoria não deve impedir o cadastro, mas o erro fica explícito no log do Render.
+    console.error('Falha ao gravar auditoria:', error);
+  }
 }
 
 async function pipedriveRequest(companyId, endpoint, options = {}) {
@@ -538,6 +600,98 @@ async function searchOrganizationByCnpj(companyId, rawCnpj) {
     : { id: null, name: null, cnpj: result.cnpj, fieldKey: result.fieldKey };
 }
 
+async function getCnpjBindingByCnpj(companyId, rawCnpj) {
+  if (!pool) return null;
+  const cnpj = normalizeCnpj(rawCnpj);
+  const result = await pool.query(
+    `SELECT company_id, cnpj, organization_id, status
+       FROM cnpj_registry
+      WHERE company_id=$1 AND cnpj=$2`,
+    [companyId, cnpj]
+  );
+  return result.rows[0] || null;
+}
+
+async function getCnpjBindingByOrganization(companyId, organizationId) {
+  if (!pool || !organizationId) return null;
+  const result = await pool.query(
+    `SELECT company_id, cnpj, organization_id, status
+       FROM cnpj_registry
+      WHERE company_id=$1 AND organization_id=$2
+      ORDER BY updated_at DESC
+      LIMIT 1`,
+    [companyId, Number(organizationId)]
+  );
+  return result.rows[0] || null;
+}
+
+function cnpjLockError(code, message) {
+  const err = new Error(message);
+  err.status = 409;
+  err.code = code;
+  return err;
+}
+
+async function bindCnpjToOrganization(companyId, rawCnpj, organizationId) {
+  const cnpj = normalizeCnpj(rawCnpj);
+  const orgId = Number(organizationId);
+  if (!isValidCnpj(cnpj) || !orgId) throw new Error('Vínculo CNPJ/Organização inválido.');
+
+  const boundOrg = await getCnpjBindingByOrganization(companyId, orgId);
+  if (boundOrg && normalizeCnpj(boundOrg.cnpj) !== cnpj) {
+    throw cnpjLockError(
+      'ORG_CNPJ_LOCKED',
+      `A Organização #${orgId} já está vinculada ao CNPJ ${formatCnpj(boundOrg.cnpj)}. O CNPJ não pode ser substituído.`
+    );
+  }
+
+  const boundCnpj = await getCnpjBindingByCnpj(companyId, cnpj);
+  if (boundCnpj?.organization_id && Number(boundCnpj.organization_id) !== orgId) {
+    throw cnpjLockError(
+      'CNPJ_BOUND_TO_OTHER_ORG',
+      `O CNPJ ${formatCnpj(cnpj)} já está vinculado à Organização #${boundCnpj.organization_id}.`
+    );
+  }
+
+  await pool.query(
+    `INSERT INTO cnpj_registry (company_id, cnpj, organization_id, status, updated_at)
+     VALUES ($1,$2,$3,'ready',NOW())
+     ON CONFLICT (company_id, cnpj) DO UPDATE SET
+       organization_id=COALESCE(cnpj_registry.organization_id, EXCLUDED.organization_id),
+       status='ready',
+       updated_at=NOW()`,
+    [companyId, cnpj, orgId]
+  );
+}
+
+async function verifyOrganizationCnpj(companyId, organizationId, rawExpectedCnpj) {
+  const expectedCnpj = normalizeCnpj(rawExpectedCnpj);
+  if (!isValidCnpj(expectedCnpj)) {
+    throw cnpjLockError('CNPJ_REQUIRED_FOR_LOCK', 'Revalide o CNPJ antes de continuar.');
+  }
+
+  const cnpjFieldKey = await getCnpjFieldKey(companyId);
+  const organization = await getOrganization(companyId, organizationId, cnpjFieldKey);
+  const currentCnpj = normalizeCnpj(organization?.custom_fields?.[cnpjFieldKey] || '');
+
+  if (!currentCnpj) {
+    throw cnpjLockError(
+      'CNPJ_MISSING_ON_ORG',
+      `A Organização #${organizationId} está sem CNPJ. Por segurança, o aplicativo não vai preencher nem substituir esse campo automaticamente.`
+    );
+  }
+
+  if (currentCnpj !== expectedCnpj) {
+    throw cnpjLockError(
+      'CNPJ_IMMUTABLE_MISMATCH',
+      `O CNPJ da Organização #${organizationId} foi alterado fora do fluxo validado. Esperado: ${formatCnpj(expectedCnpj)}. Atual: ${formatCnpj(currentCnpj)}. Restaure o CNPJ correto antes de continuar.`
+    );
+  }
+
+  await bindCnpjToOrganization(companyId, expectedCnpj, organizationId);
+  return organization;
+}
+
 function buildBrasilApiAddress(data) {
   const parts = [];
   if (data.logradouro) parts.push(clean(data.logradouro, 250));
@@ -622,13 +776,14 @@ async function fillMissingRegistryEmail(cnpj, registry) {
   return { registry, changed: true };
 }
 
-async function lookupBrasilApiCnpj(rawCnpj, { force = false } = {}) {
+async function lookupBrasilApiCnpj(rawCnpj, { force = false, withEmailFallback = true } = {}) {
   const cnpj = normalizeCnpj(rawCnpj);
 
   if (!force) {
     const cached = await getCachedBrasilApiCnpj(cnpj);
     if (cached) {
       // Corrige também caches antigos que ficaram salvos sem e-mail.
+      if (!withEmailFallback) return cached;
       const enriched = await fillMissingRegistryEmail(cnpj, cached);
       if (enriched.changed) await saveCachedBrasilApiCnpj(cnpj, enriched.registry);
       return enriched.registry;
@@ -708,7 +863,9 @@ async function lookupBrasilApiCnpj(rawCnpj, { force = false } = {}) {
 
     // Alguns CNPJs retornam email=null na BrasilAPI. Nesses casos, tenta
     // uma segunda fonte pública/gratuita somente para o endereço eletrônico.
-    result = (await fillMissingRegistryEmail(cnpj, result)).registry;
+    if (withEmailFallback) {
+      result = (await fillMissingRegistryEmail(cnpj, result)).registry;
+    }
 
     await saveCachedBrasilApiCnpj(cnpj, result);
     return result;
@@ -953,15 +1110,30 @@ function validateNewCompanyPayload(body) {
 
 function apiError(res, error) {
   console.error(error);
-  res.status(error.status || 500).json({ ok: false, error: error.message || 'Erro inesperado.' });
+  res.status(error.status || 500).json({
+    ok: false,
+    ...(error.code ? { code: error.code } : {}),
+    error: error.message || 'Erro inesperado.'
+  });
 }
 
 app.get('/health', async (_req, res) => {
   let database = false;
+  let technicalOauthReady = false;
+  let technicalUserName = null;
   if (pool) {
     try {
       await pool.query('SELECT 1');
       database = true;
+      const tech = await pool.query(
+        `SELECT technical_user_name
+           FROM pipedrive_oauth
+          WHERE technical_locked=TRUE
+          ORDER BY updated_at DESC
+          LIMIT 1`
+      );
+      technicalOauthReady = Boolean(tech.rows.length);
+      technicalUserName = tech.rows[0]?.technical_user_name || null;
     } catch (_) {
       database = false;
     }
@@ -971,8 +1143,10 @@ app.get('/health', async (_req, res) => {
     ok: true,
     database,
     pipedriveConfigured: Boolean(CLIENT_ID && CLIENT_SECRET && CALLBACK_URL),
+    technicalOauthReady,
+    technicalUserName,
     callbackUrl: CALLBACK_URL || null,
-    version: '6.2.0'
+    version: '6.3.0'
   });
 });
 
@@ -980,7 +1154,7 @@ app.get('/', (_req, res) => {
   res.type('html').send(`<!doctype html>
   <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Pipedrive CNPJ MVP</title><style>body{font-family:Arial,sans-serif;max-width:720px;margin:60px auto;padding:0 24px;color:#252525}code{background:#f3f3f3;padding:3px 6px;border-radius:4px}</style></head>
-  <body><h1>Pipedrive CNPJ MVP v6.2</h1><p>Serviço online.</p><p>Janela flutuante: <code>/floating</code></p><p>Modal legado: <code>/modal</code></p><p>OAuth callback: <code>/oauth/callback</code></p><p>Health: <code>/health</code></p></body></html>`);
+  <body><h1>Pipedrive CNPJ MVP v6.3.0</h1><p>Serviço online.</p><p>Janela flutuante: <code>/floating</code></p><p>Modal legado: <code>/modal</code></p><p>OAuth callback: <code>/oauth/callback</code></p><p>Health: <code>/health</code></p></body></html>`);
 });
 
 app.get('/oauth/callback', async (req, res) => {
@@ -1003,26 +1177,60 @@ app.get('/oauth/callback', async (req, res) => {
 
     const companyId = meJson.data.company_id;
     const userId = meJson.data.id;
+    const userName = clean(meJson.data.name, 255);
+    const userEmail = normalizeEmail(meJson.data.email || '');
     const expiresAt = new Date(Date.now() + Number(tokens.expires_in || 3600) * 1000);
 
-    await pool.query(
-      `INSERT INTO pipedrive_oauth
-        (company_id, user_id, access_token, refresh_token, api_domain, expires_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,NOW())
-       ON CONFLICT (company_id) DO UPDATE SET
-         user_id = EXCLUDED.user_id,
-         access_token = EXCLUDED.access_token,
-         refresh_token = EXCLUDED.refresh_token,
-         api_domain = EXCLUDED.api_domain,
-         expires_at = EXCLUDED.expires_at,
-         updated_at = NOW()`,
-      [companyId, userId, tokens.access_token, tokens.refresh_token, tokens.api_domain, expiresAt]
-    );
+    const current = await pool.query('SELECT * FROM pipedrive_oauth WHERE company_id=$1', [companyId]);
+    const currentRow = current.rows[0] || null;
+    const isExpectedTechnicalUser = normalizeFieldName(userName) === normalizeFieldName(TECHNICAL_USER_NAME);
+    let technicalAssigned = false;
+    let technicalUserId = currentRow?.technical_locked ? currentRow.user_id : null;
+    let technicalUserName = currentRow?.technical_locked ? currentRow.technical_user_name : null;
+
+    if (!currentRow?.technical_locked && isExpectedTechnicalUser) {
+      await pool.query(
+        `INSERT INTO pipedrive_oauth
+          (company_id, user_id, access_token, refresh_token, api_domain, expires_at, updated_at, technical_locked, technical_user_name, technical_user_email)
+         VALUES ($1,$2,$3,$4,$5,$6,NOW(),TRUE,$7,$8)
+         ON CONFLICT (company_id) DO UPDATE SET
+           user_id = EXCLUDED.user_id,
+           access_token = EXCLUDED.access_token,
+           refresh_token = EXCLUDED.refresh_token,
+           api_domain = EXCLUDED.api_domain,
+           expires_at = EXCLUDED.expires_at,
+           updated_at = NOW(),
+           technical_locked = TRUE,
+           technical_user_name = EXCLUDED.technical_user_name,
+           technical_user_email = EXCLUDED.technical_user_email`,
+        [companyId, userId, tokens.access_token, tokens.refresh_token, tokens.api_domain, expiresAt, userName, userEmail]
+      );
+      technicalAssigned = true;
+      technicalUserId = userId;
+      technicalUserName = userName;
+    } else if (currentRow?.technical_locked && String(currentRow.user_id) === String(userId)) {
+      await pool.query(
+        `UPDATE pipedrive_oauth
+            SET access_token=$2, refresh_token=$3, api_domain=$4, expires_at=$5, updated_at=NOW(),
+                technical_user_name=$6, technical_user_email=$7
+          WHERE company_id=$1`,
+        [companyId, tokens.access_token, tokens.refresh_token, tokens.api_domain, expiresAt, userName, userEmail]
+      );
+      technicalAssigned = true;
+      technicalUserId = userId;
+      technicalUserName = userName;
+    }
+
+    const technicalText = technicalAssigned
+      ? `A integração da API está fixada em <strong>${technicalUserName || TECHNICAL_USER_NAME}</strong> (usuário #${technicalUserId}).`
+      : currentRow?.technical_locked
+        ? `Sua autorização foi concluída, mas as chamadas da API continuam usando o usuário técnico <strong>${currentRow.technical_user_name || TECHNICAL_USER_NAME}</strong> (usuário #${currentRow.user_id}).`
+        : `Sua autorização foi concluída, porém o OAuth técnico ainda não foi definido. Entre como <strong>${TECHNICAL_USER_NAME}</strong> e autorize o aplicativo uma vez antes de usar o cadastro.`;
 
     res.type('html').send(`<!doctype html>
       <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-      <title>Aplicativo instalado</title><style>body{font-family:Arial,sans-serif;background:#f7f7f7;margin:0;padding:40px}.box{max-width:620px;margin:auto;background:#fff;padding:32px;border-radius:12px;box-shadow:0 3px 16px #0001}.ok{font-size:42px}h1{margin:8px 0 12px}</style></head>
-      <body><div class="box"><div class="ok">✅</div><h1>Aplicativo autorizado</h1><p>A autorização do Pipedrive foi concluída e os tokens foram armazenados.</p><p>Volte ao Pipedrive e teste <strong>Cadastrar / Vincular empresa</strong>.</p></div></body></html>`);
+      <title>Aplicativo instalado</title><style>body{font-family:Arial,sans-serif;background:#f7f7f7;margin:0;padding:40px}.box{max-width:680px;margin:auto;background:#fff;padding:32px;border-radius:12px;box-shadow:0 3px 16px #0001}.ok{font-size:42px}h1{margin:8px 0 12px}.note{padding:12px;border-radius:8px;background:#eef6ff;margin:16px 0}</style></head>
+      <body><div class="box"><div class="ok">✅</div><h1>Aplicativo autorizado</h1><div class="note">${technicalText}</div><p>O proprietário dos registros continua sendo o usuário que abriu a extensão. O histórico nativo de chamadas da API fica identificado pelo usuário técnico.</p><p>Volte ao Pipedrive e teste <strong>Cadastrar cliente</strong>.</p></div></body></html>`);
   } catch (error) {
     console.error('OAuth callback:', error);
     res.status(500).type('html').send(`<h2>Erro no OAuth</h2><pre>${String(error.message || error)}</pre>`);
@@ -1057,9 +1265,44 @@ app.post('/api/check-cnpj', async (req, res) => {
       return res.status(422).json({ ok: false, error: 'CNPJ inválido.', cnpj });
     }
 
+    // Se o CNPJ já foi criado/confirmado pelo app, o vínculo com a Organização é imutável.
+    const registryBinding = await getCnpjBindingByCnpj(companyId, cnpj);
+    if (registryBinding?.organization_id) {
+      const cnpjFieldKey = await getCnpjFieldKey(companyId);
+      const boundOrg = await getOrganization(companyId, registryBinding.organization_id, cnpjFieldKey);
+      const currentCnpj = normalizeCnpj(boundOrg?.custom_fields?.[cnpjFieldKey] || '');
+      if (currentCnpj !== cnpj) {
+        throw cnpjLockError(
+          'CNPJ_CHANGED_OUTSIDE_APP',
+          `O CNPJ ${formatCnpj(cnpj)} está vinculado à Organização #${registryBinding.organization_id}, mas o campo foi alterado no Pipedrive para ${currentCnpj ? formatCnpj(currentCnpj) : 'vazio'}. Restaure o CNPJ original antes de continuar.`
+        );
+      }
+      return res.json({
+        ok: true, valid: true, exists: true, cnpj, formattedCnpj: formatCnpj(cnpj),
+        organizations: [{ id: Number(boundOrg.id), name: boundOrg.name, address: boundOrg?.address?.value || boundOrg?.address || null }],
+        registry: null
+      });
+    }
+
     // Primeiro consulta o próprio Pipedrive. Se já existir, não desperdiça uma chamada externa.
     const pipeResult = await searchOrganizationsByCnpj(companyId, cnpj);
     if (pipeResult.organizations.length) {
+      for (const org of pipeResult.organizations) {
+        const previousBinding = await getCnpjBindingByOrganization(companyId, org.id);
+        if (previousBinding && normalizeCnpj(previousBinding.cnpj) !== cnpj) {
+          throw cnpjLockError(
+            'CNPJ_CHANGED_OUTSIDE_APP',
+            `A Organização #${org.id} já foi vinculada ao CNPJ ${formatCnpj(previousBinding.cnpj)} e agora está com ${formatCnpj(cnpj)}. O CNPJ não pode ser substituído.`
+          );
+        }
+      }
+
+      // Quando há uma única Organização, já consolida o vínculo imutável.
+      // Em duplicidades históricas, aguarda o usuário escolher qual registro será o canônico.
+      if (pipeResult.organizations.length === 1) {
+        await bindCnpjToOrganization(companyId, cnpj, pipeResult.organizations[0].id);
+      }
+
       return res.json({
         ok: true,
         valid: true,
@@ -1159,7 +1402,7 @@ app.post('/api/create-company-contact-link', async (req, res) => {
 
     // Se a BrasilAPI localizar o CNPJ e a situação não for ATIVA, bloqueia a criação.
     // Se a API estiver indisponível ou ainda não localizar o CNPJ, o preenchimento manual continua possível.
-    const registryValidation = await lookupBrasilApiCnpj(cnpj);
+    const registryValidation = await lookupBrasilApiCnpj(cnpj, { withEmailFallback: false });
     if (registryValidation.found && !registryValidation.active) {
       return res.status(422).json({
         ok: false,
@@ -1206,6 +1449,7 @@ app.post('/api/create-company-contact-link', async (req, res) => {
       ownerId
     );
     const organization = createResult.organization;
+    await writeAudit({ companyId, actorUserId: ownerId, action: 'CREATE_ORGANIZATION', entityType: 'organization', entityId: organization.id, cnpj, details: { ownerId, legacyFlow: true } });
 
     // Registra o ID imediatamente para não perder a referência se a criação da Pessoa falhar.
     await pool.query(
@@ -1216,6 +1460,7 @@ app.post('/api/create-company-contact-link', async (req, res) => {
     );
 
     const person = await createPerson(companyId, organization.id, req.body, ownerId);
+    await writeAudit({ companyId, actorUserId: ownerId, action: 'CREATE_PERSON', entityType: 'person', entityId: person.id, cnpj, details: { organizationId: organization.id, ownerId, legacyFlow: true } });
     await linkContactsToDeal(companyId, dealId, organization.id, person.id);
 
     await pool.query(
@@ -1324,11 +1569,13 @@ app.post('/api/create-contact-existing', async (req, res) => {
     const ownerId = resolveLoggedUserId(payload, req.body.userId);
     const companyId = String(req.body.companyId || '');
     const organizationId = Number(req.body.organizationId);
+    const cnpj = normalizeCnpj(req.body.cnpj);
 
-    if (!companyId || !organizationId) {
-      return res.status(400).json({ ok: false, error: 'companyId/organizationId não informados.' });
+    if (!companyId || !organizationId || !isValidCnpj(cnpj)) {
+      return res.status(400).json({ ok: false, error: 'companyId/organizationId/CNPJ não informados ou inválidos.' });
     }
     validateCompanyAgainstToken(payload, companyId);
+    await verifyOrganizationCnpj(companyId, organizationId, cnpj);
 
     const validationError = validateNewCompanyPayload({
       legalName: 'organização existente',
@@ -1340,6 +1587,7 @@ app.post('/api/create-contact-existing', async (req, res) => {
 
     const organization = await getOrganization(companyId, organizationId, await getCnpjFieldKey(companyId));
     const person = await createPerson(companyId, organizationId, req.body, ownerId);
+    await writeAudit({ companyId, actorUserId: ownerId, action: 'CREATE_PERSON', entityType: 'person', entityId: person.id, cnpj, details: { organizationId } });
 
     res.json({
       ok: true,
@@ -1383,7 +1631,7 @@ app.post('/api/create-client', async (req, res) => {
       });
     }
 
-    const registryValidation = await lookupBrasilApiCnpj(cnpj);
+    const registryValidation = await lookupBrasilApiCnpj(cnpj, { withEmailFallback: false });
     if (registryValidation.found && !registryValidation.active) {
       return res.status(422).json({
         ok: false,
@@ -1428,6 +1676,7 @@ app.post('/api/create-client', async (req, res) => {
       ownerId
     );
     const organization = createResult.organization;
+    await writeAudit({ companyId, actorUserId: ownerId, action: 'CREATE_ORGANIZATION', entityType: 'organization', entityId: organization.id, cnpj, details: { ownerId } });
 
     await pool.query(
       `UPDATE cnpj_registry
@@ -1437,6 +1686,7 @@ app.post('/api/create-client', async (req, res) => {
     );
 
     const person = await createPerson(companyId, organization.id, req.body, ownerId);
+    await writeAudit({ companyId, actorUserId: ownerId, action: 'CREATE_PERSON', entityType: 'person', entityId: person.id, cnpj, details: { organizationId: organization.id, ownerId } });
 
     await pool.query(
       `UPDATE cnpj_registry SET status='ready', updated_at=NOW()
@@ -1475,13 +1725,18 @@ app.post('/api/create-deal', async (req, res) => {
     const companyId = String(req.body.companyId || '');
     const organizationId = Number(req.body.organizationId);
     const personId = Number(req.body.personId);
+    const cnpj = normalizeCnpj(req.body.cnpj);
 
-    if (!companyId || !organizationId || !personId) {
-      return res.status(400).json({ ok: false, error: 'companyId/organizationId/personId não informados.' });
+    if (!companyId || !organizationId || !personId || !isValidCnpj(cnpj)) {
+      return res.status(400).json({ ok: false, error: 'companyId/organizationId/personId/CNPJ não informados ou inválidos.' });
     }
     validateCompanyAgainstToken(payload, companyId);
+    await verifyOrganizationCnpj(companyId, organizationId, cnpj);
 
     const result = await createDealIdempotent(companyId, organizationId, personId, req.body, ownerId);
+    if (!result.reused) {
+      await writeAudit({ companyId, actorUserId: ownerId, action: 'CREATE_DEAL', entityType: 'deal', entityId: result.deal.id, cnpj, details: { organizationId, personId, ownerId, requestId: clean(req.body.requestId, 80) } });
+    }
     res.json({
       ok: true,
       deal: { id: Number(result.deal.id), title: result.deal.title },
@@ -1506,17 +1761,17 @@ app.post('/api/sync-existing-organization', async (req, res) => {
     }
     validateCompanyAgainstToken(payload, companyId);
 
+    // CNPJ é imutável: confirma que a Organização selecionada ainda possui exatamente o CNPJ consultado.
+    // A atualização cadastral nunca envia o campo CNPJ no PATCH.
+    await verifyOrganizationCnpj(companyId, organizationId, cnpj);
+
     const registry = await lookupBrasilApiCnpj(cnpj);
     if (!registry.found) {
       return res.status(422).json({ ok: false, error: registry.warning || 'Dados cadastrais não localizados.' });
     }
 
-    const cnpjFieldKey = await getCnpjFieldKey(companyId);
     const registryFields = await buildRegistryCustomFields(companyId, registry.data);
-    const customFields = {
-      [cnpjFieldKey]: cnpj,
-      ...registryFields.customFields
-    };
+    const customFields = { ...registryFields.customFields };
 
     const d = registry.data;
     const body = { custom_fields: customFields };
@@ -1536,6 +1791,9 @@ app.post('/api/sync-existing-organization', async (req, res) => {
       { method: 'PATCH', body: JSON.stringify(body) }
     );
 
+    const actorUserId = resolveLoggedUserId(payload, req.body.userId);
+    await writeAudit({ companyId, actorUserId, action: 'SYNC_ORGANIZATION', entityType: 'organization', entityId: organizationId, cnpj, details: { fieldsUpdated: Object.keys(customFields) } });
+
     res.json({
       ok: true,
       organization: { id: Number(updated.data.id), name: updated.data.name },
@@ -1551,7 +1809,7 @@ app.post('/api/sync-existing-organization', async (req, res) => {
 initDb()
   .then(() => {
     app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Pipedrive CNPJ MVP v6 ouvindo na porta ${PORT}`);
+      console.log(`Pipedrive CNPJ MVP v6.3 ouvindo na porta ${PORT}`);
     });
   })
   .catch((error) => {
