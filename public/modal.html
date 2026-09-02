@@ -271,13 +271,18 @@
               <label for="addressLine">Endereço</label>
               <input id="addressLine" type="text" maxlength="500" placeholder="Rua, número, bairro, complemento" autocomplete="street-address" />
             </div>
+            <div class="field full">
+              <label for="orgEmail">E-mail da organização</label>
+              <input id="orgEmail" type="email" maxlength="255" placeholder="empresa@dominio.com.br" autocomplete="off" />
+              <div class="hint">Preenchido pelo endereço eletrônico retornado na consulta cadastral.</div>
+            </div>
           </div>
         </div>
 
         <div class="section">
           <h2>Contato principal</h2>
           <div class="hint" style="margin-bottom:12px">
-            Telefone e e-mail cadastrais retornados pela consulta são apenas sugestões. Confirme os dados do contato principal.
+            O telefone cadastral retornado pela consulta é apenas uma sugestão. Informe o contato principal correto.
           </div>
           <div class="grid">
             <div class="field full">
@@ -321,6 +326,7 @@
 
     const params = new URLSearchParams(window.location.search);
     const companyId = params.get('companyId') || '';
+    const userId = params.get('userId') || '';
     const dealId = (params.get('selectedIds') || '').split(',')[0].trim();
     const initialToken = params.get('token') || '';
     const el = (id) => document.getElementById(id);
@@ -379,7 +385,7 @@
           'Content-Type': 'application/json',
           'x-pipedrive-token': initialToken
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ ...payload, userId })
       });
       const json = await response.json().catch(() => ({ ok: false, error: 'Resposta inválida do servidor.' }));
       if (!response.ok || json.ok === false) {
@@ -463,7 +469,8 @@
 
       // São dados cadastrais da empresa. O usuário pode substituir pelos dados do contato principal.
       if (data.phone) el('phone').value = data.phone;
-      if (data.email) el('email').value = data.email;
+      if (el('orgEmail')) el('orgEmail').value = data.email || '';
+      el('email').value = '';
 
       registryAllowsCreation = Boolean(registry.active);
       el('registryCard').style.display = 'block';
@@ -587,6 +594,7 @@
           state: el('state').value,
           city: el('city').value,
           addressLine: el('addressLine').value,
+          organizationEmail: el('orgEmail') ? el('orgEmail').value : '',
           contactName: el('contactName').value,
           phone: el('phone').value,
           email: el('email').value
@@ -629,7 +637,7 @@
         ? `Negócio atual: #${dealId}`
         : 'Negócio não identificado. Abra o modal a partir dos detalhes de um negócio.';
 
-      if (!companyId || !dealId || !initialToken) {
+      if (!companyId || !userId || !dealId || !initialToken) {
         setMessage('Contexto do Pipedrive incompleto. Abra este formulário pelo menu de ações do Deal.', 'error');
         el('btnCheck').disabled = true;
       }

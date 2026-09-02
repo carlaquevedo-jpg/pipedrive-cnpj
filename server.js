@@ -15,6 +15,7 @@ const CALLBACK_URL = process.env.PIPEDRIVE_CALLBACK_URL || '';
 const DATABASE_URL = process.env.DATABASE_URL || '';
 const CNPJ_FIELD_KEY_ENV = process.env.PIPEDRIVE_CNPJ_FIELD_KEY || '';
 const TRADE_NAME_FIELD_KEY_ENV = process.env.PIPEDRIVE_TRADE_NAME_FIELD_KEY || '';
+const ORG_EMAIL_FIELD_KEY_ENV = process.env.PIPEDRIVE_ORG_EMAIL_FIELD_KEY || '';
 const BRASIL_API_CNPJ_URL = 'https://brasilapi.com.br/api/cnpj/v1';
 
 const pool = DATABASE_URL ? new Pool({ connectionString: DATABASE_URL }) : null;
@@ -124,6 +125,30 @@ function verifyExtensionToken(token) {
 function companyIdFromPayload(payload) {
   if (!payload || typeof payload !== 'object') return null;
   return payload.companyId ?? payload.company_id ?? payload.company?.id ?? null;
+}
+
+function userIdFromPayload(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  return payload.userId ?? payload.user_id ?? payload.user?.id ?? payload.pipedrive_user_id ?? null;
+}
+
+function resolveLoggedUserId(payload, providedUserId) {
+  const tokenUserId = userIdFromPayload(payload);
+  const requestedUserId = Number(providedUserId || tokenUserId || 0);
+
+  if (!requestedUserId) {
+    const err = new Error('Não foi possível identificar o usuário logado no Pipedrive.');
+    err.status = 401;
+    throw err;
+  }
+
+  if (tokenUserId != null && String(tokenUserId) !== String(requestedUserId)) {
+    const err = new Error('Usuário do token não corresponde ao usuário informado pela extensão.');
+    err.status = 403;
+    throw err;
+  }
+
+  return requestedUserId;
 }
 
 function validateCompanyAgainstToken(payload, companyId) {
@@ -295,6 +320,22 @@ async function getTradeNameFieldKey(companyId) {
   return candidate ? fieldKey(candidate) : null;
 }
 
+async function getOrganizationEmailFieldKey(companyId) {
+  if (ORG_EMAIL_FIELD_KEY_ENV) return ORG_EMAIL_FIELD_KEY_ENV;
+
+  const list = await getOrganizationFields(companyId);
+  const candidate = findOrganizationField(list, [
+    'E-mail',
+    'Email',
+    'Endereço Eletrônico',
+    'Endereco Eletronico',
+    'E-mail da Organização',
+    'Email da Organização'
+  ]);
+
+  return candidate ? fieldKey(candidate) : null;
+}
+
 function normalizeDateForPipedrive(value) {
   const raw = clean(value, 40);
   if (!raw) return '';
@@ -419,6 +460,7 @@ async function buildRegistryCustomFields(companyId, registryData) {
   putText(['Descrição CNAE Principal', 'Descricao CNAE Principal'], registryData?.cnaeDescription);
   putText(['Natureza Jurídica', 'Natureza Juridica'], registryData?.legalNature);
   putText(['Quadro Societário (QSA)', 'Quadro Societario (QSA)', 'QSA'], registryData?.qsaText);
+  putText(['E-mail', 'Email', 'Endereço Eletrônico', 'Endereco Eletronico', 'E-mail da Organização', 'Email da Organização'], registryData?.email);
 
   return { customFields, warnings };
 }
@@ -543,7 +585,7 @@ async function lookupBrasilApiCnpj(rawCnpj, { force = false } = {}) {
     const response = await fetch(`${BRASIL_API_CNPJ_URL}/${encodeURIComponent(cnpj)}`, {
       headers: {
         Accept: 'application/json',
-        'User-Agent': 'Pipedrive-CNPJ/6.0'
+        'User-Agent': 'Pipedrive-CNPJ/6.1'
       },
       signal: controller.signal
     });
@@ -633,13 +675,16 @@ function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-async function createOrganization(companyId, data, cnpj, cnpjFieldKey, registryData = null) {
+async function createOrganization(companyId, data, cnpj, cnpjFieldKey, registryData = null, ownerId = null) {
   const legalName = clean(data.legalName);
   const tradeName = clean(data.tradeName);
   const addressLine = clean(data.addressLine, 500);
   const postalCode = clean(data.postalCode, 30);
   const city = clean(data.city, 100);
   const state = clean(data.state, 100).toUpperCase();
+  const confirmedOrganizationEmail = normalizeEmail(data.organizationEmail || '');
+  const registryOrganizationEmail = normalizeEmail(registryData?.email || '');
+  const organizationEmail = confirmedOrganizationEmail || registryOrganizationEmail;
 
   const customFields = { [cnpjFieldKey]: normalizeCnpj(cnpj) };
   const warnings = [];
@@ -666,10 +711,24 @@ async function createOrganization(companyId, data, cnpj, cnpjFieldKey, registryD
     if (tradeNameFieldKey) customFields[tradeNameFieldKey] = tradeName;
   }
 
+  // A Organização não possui e-mail nativo na API v2. Salvamos no campo personalizado
+  // "E-mail" / "Endereço Eletrônico" quando ele existir no Pipedrive.
+  // Se o usuário editou o e-mail cadastral (ou se estamos em preenchimento manual),
+  // o valor confirmado na tela prevalece sobre o retornado pela BrasilAPI.
+  if (organizationEmail && (!registryData || organizationEmail !== registryOrganizationEmail)) {
+    const organizationEmailFieldKey = await getOrganizationEmailFieldKey(companyId);
+    if (organizationEmailFieldKey) {
+      customFields[organizationEmailFieldKey] = organizationEmail;
+    } else {
+      warnings.push('E-mail da Organização não foi salvo porque o campo personalizado "E-mail"/"Endereço Eletrônico" não foi encontrado.');
+    }
+  }
+
   const body = {
     name: legalName,
     custom_fields: customFields
   };
+  if (ownerId) body.owner_id = Number(ownerId);
 
   if (addressLine || postalCode || city || state) {
     body.address = {
@@ -692,7 +751,7 @@ async function createOrganization(companyId, data, cnpj, cnpjFieldKey, registryD
   };
 }
 
-async function createPerson(companyId, organizationId, data) {
+async function createPerson(companyId, organizationId, data, ownerId = null) {
   const contactName = clean(data.contactName);
   const phone = clean(data.phone, 100);
   const email = normalizeEmail(data.email);
@@ -703,6 +762,7 @@ async function createPerson(companyId, organizationId, data) {
     phones: [{ value: phone, primary: true, label: 'work' }],
     emails: [{ value: email, primary: true, label: 'work' }]
   };
+  if (ownerId) body.owner_id = Number(ownerId);
 
   const json = await pipedriveRequest(companyId, '/api/v2/persons', {
     method: 'POST',
@@ -722,7 +782,7 @@ async function linkContactsToDeal(companyId, dealId, organizationId, personId = 
   return json.data;
 }
 
-async function createDeal(companyId, organizationId, personId, data = {}) {
+async function createDeal(companyId, organizationId, personId, data = {}, ownerId = null) {
   const title = clean(data.dealTitle || data.title, 255);
   if (!title) {
     const err = new Error('Informe o título do negócio.');
@@ -736,6 +796,7 @@ async function createDeal(companyId, organizationId, personId, data = {}) {
   };
 
   if (personId) body.person_id = Number(personId);
+  if (ownerId) body.owner_id = Number(ownerId);
 
   const normalizedValue = String(data.dealValue ?? '').trim().replace(',', '.');
   const value = normalizedValue ? Number(normalizedValue) : NaN;
@@ -751,7 +812,7 @@ async function createDeal(companyId, organizationId, personId, data = {}) {
   return json.data;
 }
 
-async function createDealIdempotent(companyId, organizationId, personId, data = {}) {
+async function createDealIdempotent(companyId, organizationId, personId, data = {}, ownerId = null) {
   const requestId = clean(data.requestId, 80);
   if (!requestId) {
     const err = new Error('requestId não informado para criação segura do negócio.');
@@ -795,7 +856,7 @@ async function createDealIdempotent(companyId, organizationId, personId, data = 
   }
 
   try {
-    const deal = await createDeal(companyId, organizationId, personId, data);
+    const deal = await createDeal(companyId, organizationId, personId, data, ownerId);
     await pool.query(
       `UPDATE deal_creation_registry
           SET deal_id=$2, status='created', updated_at=NOW()
@@ -818,11 +879,13 @@ function validateNewCompanyPayload(body) {
   const contactName = clean(body.contactName);
   const phone = clean(body.phone, 100);
   const email = normalizeEmail(body.email);
+  const organizationEmail = normalizeEmail(body.organizationEmail);
 
   if (!legalName) return 'Informe a Razão Social.';
   if (!contactName) return 'Informe o nome do contato principal.';
   if (!phone) return 'Informe o telefone do contato principal.';
   if (!isValidEmail(email)) return 'Informe um e-mail válido para o contato principal.';
+  if (body.organizationEmail && !isValidEmail(organizationEmail)) return 'Informe um e-mail válido para a Organização.';
   return null;
 }
 
@@ -847,7 +910,7 @@ app.get('/health', async (_req, res) => {
     database,
     pipedriveConfigured: Boolean(CLIENT_ID && CLIENT_SECRET && CALLBACK_URL),
     callbackUrl: CALLBACK_URL || null,
-    version: '6.0.0'
+    version: '6.1.0'
   });
 });
 
@@ -855,7 +918,7 @@ app.get('/', (_req, res) => {
   res.type('html').send(`<!doctype html>
   <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Pipedrive CNPJ MVP</title><style>body{font-family:Arial,sans-serif;max-width:720px;margin:60px auto;padding:0 24px;color:#252525}code{background:#f3f3f3;padding:3px 6px;border-radius:4px}</style></head>
-  <body><h1>Pipedrive CNPJ MVP v6</h1><p>Serviço online.</p><p>Janela flutuante: <code>/floating</code></p><p>Modal legado: <code>/modal</code></p><p>OAuth callback: <code>/oauth/callback</code></p><p>Health: <code>/health</code></p></body></html>`);
+  <body><h1>Pipedrive CNPJ MVP v6.1</h1><p>Serviço online.</p><p>Janela flutuante: <code>/floating</code></p><p>Modal legado: <code>/modal</code></p><p>OAuth callback: <code>/oauth/callback</code></p><p>Health: <code>/health</code></p></body></html>`);
 });
 
 app.get('/oauth/callback', async (req, res) => {
@@ -1005,6 +1068,7 @@ app.post('/api/create-company-contact-link', async (req, res) => {
     assertConfig();
     const token = req.get('x-pipedrive-token') || req.body?.token;
     const payload = verifyExtensionToken(token);
+    const ownerId = resolveLoggedUserId(payload, req.body.userId);
 
     companyId = String(req.body.companyId || '');
     const dealId = String(req.body.dealId || '');
@@ -1076,7 +1140,8 @@ app.post('/api/create-company-contact-link', async (req, res) => {
       req.body,
       cnpj,
       cnpjFieldKey,
-      registryValidation.found ? registryValidation.data : null
+      registryValidation.found ? registryValidation.data : null,
+      ownerId
     );
     const organization = createResult.organization;
 
@@ -1088,7 +1153,7 @@ app.post('/api/create-company-contact-link', async (req, res) => {
       [companyId, cnpj, organization.id]
     );
 
-    const person = await createPerson(companyId, organization.id, req.body);
+    const person = await createPerson(companyId, organization.id, req.body, ownerId);
     await linkContactsToDeal(companyId, dealId, organization.id, person.id);
 
     await pool.query(
@@ -1194,6 +1259,7 @@ app.post('/api/create-contact-existing', async (req, res) => {
     assertConfig();
     const token = req.get('x-pipedrive-token') || req.body?.token;
     const payload = verifyExtensionToken(token);
+    const ownerId = resolveLoggedUserId(payload, req.body.userId);
     const companyId = String(req.body.companyId || '');
     const organizationId = Number(req.body.organizationId);
 
@@ -1211,7 +1277,7 @@ app.post('/api/create-contact-existing', async (req, res) => {
     if (validationError) return res.status(422).json({ ok: false, error: validationError });
 
     const organization = await getOrganization(companyId, organizationId, await getCnpjFieldKey(companyId));
-    const person = await createPerson(companyId, organizationId, req.body);
+    const person = await createPerson(companyId, organizationId, req.body, ownerId);
 
     res.json({
       ok: true,
@@ -1233,6 +1299,7 @@ app.post('/api/create-client', async (req, res) => {
     assertConfig();
     const token = req.get('x-pipedrive-token') || req.body?.token;
     const payload = verifyExtensionToken(token);
+    const ownerId = resolveLoggedUserId(payload, req.body.userId);
 
     companyId = String(req.body.companyId || '');
     cnpj = normalizeCnpj(req.body.cnpj);
@@ -1295,7 +1362,8 @@ app.post('/api/create-client', async (req, res) => {
       req.body,
       cnpj,
       cnpjFieldKey,
-      registryValidation.found ? registryValidation.data : null
+      registryValidation.found ? registryValidation.data : null,
+      ownerId
     );
     const organization = createResult.organization;
 
@@ -1306,7 +1374,7 @@ app.post('/api/create-client', async (req, res) => {
       [companyId, cnpj, organization.id]
     );
 
-    const person = await createPerson(companyId, organization.id, req.body);
+    const person = await createPerson(companyId, organization.id, req.body, ownerId);
 
     await pool.query(
       `UPDATE cnpj_registry SET status='ready', updated_at=NOW()
@@ -1341,6 +1409,7 @@ app.post('/api/create-deal', async (req, res) => {
     assertConfig();
     const token = req.get('x-pipedrive-token') || req.body?.token;
     const payload = verifyExtensionToken(token);
+    const ownerId = resolveLoggedUserId(payload, req.body.userId);
     const companyId = String(req.body.companyId || '');
     const organizationId = Number(req.body.organizationId);
     const personId = Number(req.body.personId);
@@ -1350,7 +1419,7 @@ app.post('/api/create-deal', async (req, res) => {
     }
     validateCompanyAgainstToken(payload, companyId);
 
-    const result = await createDealIdempotent(companyId, organizationId, personId, req.body);
+    const result = await createDealIdempotent(companyId, organizationId, personId, req.body, ownerId);
     res.json({
       ok: true,
       deal: { id: Number(result.deal.id), title: result.deal.title },

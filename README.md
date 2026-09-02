@@ -1,6 +1,19 @@
-# Pipedrive CNPJ MVP v6.0.0
+# Pipedrive CNPJ MVP v6.1.0
 
-Esta versão corrige os pontos encontrados nos testes da janela flutuante.
+Esta versão parte da v6.0.0 e acrescenta os ajustes de proprietário e e-mail cadastral da Organização.
+
+## Ajustes da v6.1.0
+
+- O **Proprietário** dos novos registros passa a ser o **usuário que está logado e abriu a extensão do Pipedrive**, usando o `userId` enviado pelo Custom Floating Window e o JWT assinado da extensão.
+- Ao criar uma empresa nova, o mesmo usuário é enviado como `owner_id` da **Organização**, da **Pessoa** e do **Negócio**.
+- Quando a BrasilAPI retorna o campo `email` (endereço eletrônico), ele passa a preencher **E-mail da organização** na tela.
+- O e-mail cadastral da empresa não é mais colocado automaticamente no e-mail do contato principal; o e-mail da Pessoa deve ser informado/confirmado separadamente.
+- Na Organização, o e-mail é salvo em um campo personalizado chamado **E-mail**, **Email** ou **Endereço Eletrônico**.
+- A ação **Atualizar dados cadastrais** também atualiza esse e-mail em Organizações já existentes.
+
+> Observação: a API v2 de Organizações do Pipedrive não possui um campo nativo de e-mail. Crie um campo personalizado de Organização do tipo texto chamado `E-mail` ou `Endereço Eletrônico`. O app localiza esse campo automaticamente.
+
+> Para atribuir `owner_id` a outro usuário, o usuário técnico/OAuth usado pelo backend precisa ter permissão para alterar o proprietário dos registros.
 
 ## O que mudou
 
@@ -27,6 +40,7 @@ Esta versão corrige os pontos encontrados nos testes da janela flutuante.
 - Descrição CNAE Principal
 - Natureza Jurídica
 - Quadro Societário (QSA)
+- E-mail (ou Endereço Eletrônico)
 
 `Situação Cadastral` deve ser uma opção única contendo, conforme aplicável:
 
@@ -56,7 +70,7 @@ https://pipedrive-cnpj.onrender.com/health
 O retorno deve conter:
 
 ```json
-"version": "6.0.0"
+"version": "6.1.0"
 ```
 
 Não é necessário alterar a URL da janela flutuante no Developer Hub:
