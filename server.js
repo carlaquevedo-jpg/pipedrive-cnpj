@@ -4,6 +4,7 @@ const path = require('path');
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const { Pool } = require('pg');
+const { AsyncLocalStorage } = require('async_hooks');
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -16,14 +17,34 @@ const DATABASE_URL = process.env.DATABASE_URL || '';
 const CNPJ_FIELD_KEY_ENV = process.env.PIPEDRIVE_CNPJ_FIELD_KEY || '';
 const TRADE_NAME_FIELD_KEY_ENV = process.env.PIPEDRIVE_TRADE_NAME_FIELD_KEY || '';
 const ORG_EMAIL_FIELD_KEY_ENV = process.env.PIPEDRIVE_ORG_EMAIL_FIELD_KEY || '';
-const TECHNICAL_USER_NAME = process.env.PIPEDRIVE_TECHNICAL_USER_NAME || 'Sistema Interno';
 const BRASIL_API_CNPJ_URL = 'https://brasilapi.com.br/api/cnpj/v1';
 const CNPJ_WS_PUBLIC_URL = 'https://publica.cnpj.ws/cnpj';
 
 const pool = DATABASE_URL ? new Pool({ connectionString: DATABASE_URL }) : null;
+const requestContext = new AsyncLocalStorage();
 
 app.use(express.json({ limit: '300kb' }));
 app.use('/assets', express.static(path.join(__dirname, 'public')));
+
+// v6.4: mantém o usuário logado no contexto assíncrono de cada requisição.
+// Assim todas as chamadas internas ao Pipedrive usam o OAuth desse mesmo usuário.
+app.use('/api', (req, res, next) => {
+  try {
+    const token = req.get('x-pipedrive-token') || req.body?.token || req.query?.token;
+    const payload = verifyExtensionToken(token);
+    const userId = resolveLoggedUserId(payload, req.body?.userId || req.query?.userId);
+    const companyId = String(req.body?.companyId || req.query?.companyId || companyIdFromPayload(payload) || '');
+    if (!companyId) {
+      const err = new Error('Não foi possível identificar a empresa do Pipedrive.');
+      err.status = 400;
+      throw err;
+    }
+    validateCompanyAgainstToken(payload, companyId);
+    requestContext.run({ userId, companyId }, next);
+  } catch (error) {
+    apiError(res, error);
+  }
+});
 
 function assertConfig() {
   const missing = [];
@@ -49,11 +70,28 @@ async function initDb() {
     )
   `);
 
-  // v6.3: o OAuth usado nas chamadas da API fica preso ao usuário técnico.
-  // Colunas adicionadas com ALTER para também atualizar bancos criados por versões anteriores.
+  // Colunas legadas da v6.3 são preservadas apenas para compatibilidade com bancos existentes.
   await pool.query(`ALTER TABLE pipedrive_oauth ADD COLUMN IF NOT EXISTS technical_locked BOOLEAN NOT NULL DEFAULT FALSE`);
   await pool.query(`ALTER TABLE pipedrive_oauth ADD COLUMN IF NOT EXISTS technical_user_name TEXT`);
   await pool.query(`ALTER TABLE pipedrive_oauth ADD COLUMN IF NOT EXISTS technical_user_email TEXT`);
+
+  // v6.4: OAuth individual por usuário. Cada usuário autoriza a aplicação e
+  // as chamadas feitas pela extensão usam o token desse próprio usuário.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS pipedrive_oauth_user (
+      company_id BIGINT NOT NULL,
+      user_id BIGINT NOT NULL,
+      user_name TEXT,
+      user_email TEXT,
+      access_token TEXT NOT NULL,
+      refresh_token TEXT NOT NULL,
+      api_domain TEXT NOT NULL,
+      expires_at TIMESTAMPTZ NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (company_id, user_id)
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_pipedrive_oauth_user_company ON pipedrive_oauth_user(company_id)`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS cnpj_registry (
@@ -103,6 +141,10 @@ async function initDb() {
     )
   `);
 
+  await pool.query(`ALTER TABLE app_audit_log ADD COLUMN IF NOT EXISTS execution_user_id BIGINT`);
+  await pool.query(`ALTER TABLE app_audit_log ADD COLUMN IF NOT EXISTS actor_user_name TEXT`);
+  await pool.query(`ALTER TABLE app_audit_log ADD COLUMN IF NOT EXISTS actor_user_email TEXT`);
+  await pool.query(`ALTER TABLE app_audit_log ADD COLUMN IF NOT EXISTS note_id BIGINT`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_app_audit_company_created ON app_audit_log(company_id, created_at DESC)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_app_audit_cnpj ON app_audit_log(company_id, cnpj)`);
 }
@@ -229,15 +271,15 @@ async function refreshOauth(row) {
 
   const expiresAt = new Date(Date.now() + Number(data.expires_in || 3600) * 1000);
   const updated = await pool.query(
-    `UPDATE pipedrive_oauth
-       SET access_token = $2,
-           refresh_token = $3,
-           api_domain = $4,
-           expires_at = $5,
+    `UPDATE pipedrive_oauth_user
+       SET access_token = $3,
+           refresh_token = $4,
+           api_domain = $5,
+           expires_at = $6,
            updated_at = NOW()
-     WHERE company_id = $1
+     WHERE company_id = $1 AND user_id = $2
      RETURNING *`,
-    [row.company_id, data.access_token, data.refresh_token, data.api_domain || row.api_domain, expiresAt]
+    [row.company_id, row.user_id, data.access_token, data.refresh_token, data.api_domain || row.api_domain, expiresAt]
   );
 
   return updated.rows[0];
@@ -246,52 +288,64 @@ async function refreshOauth(row) {
 async function getOauth(companyId) {
   if (!pool) throw new Error('DATABASE_URL não configurada.');
 
-  const result = await pool.query('SELECT * FROM pipedrive_oauth WHERE company_id = $1', [companyId]);
+  const ctx = requestContext.getStore() || {};
+  const userId = Number(ctx.userId || 0);
+  if (!userId) {
+    const err = new Error('Não foi possível identificar o usuário logado para selecionar o OAuth individual.');
+    err.status = 401;
+    err.code = 'USER_CONTEXT_REQUIRED';
+    throw err;
+  }
+
+  const result = await pool.query(
+    'SELECT * FROM pipedrive_oauth_user WHERE company_id = $1 AND user_id = $2',
+    [companyId, userId]
+  );
   if (!result.rows.length) {
-    const err = new Error(`OAuth técnico ainda não configurado. Entre no Pipedrive como "${TECHNICAL_USER_NAME}" e autorize o aplicativo uma vez.`);
-    err.status = 503;
-    err.code = 'TECHNICAL_OAUTH_REQUIRED';
+    const err = new Error('Seu usuário ainda não autorizou a aplicação Validação CNPJ. Instale/autorize a aplicação com o seu próprio login do Pipedrive e tente novamente.');
+    err.status = 401;
+    err.code = 'USER_OAUTH_REQUIRED';
     throw err;
   }
 
   let row = result.rows[0];
-  if (!row.technical_locked) {
-    const err = new Error(`OAuth técnico ainda não fixado. Entre no Pipedrive como "${TECHNICAL_USER_NAME}" e autorize o aplicativo antes dos demais usuários.`);
-    err.status = 503;
-    err.code = 'TECHNICAL_OAUTH_REQUIRED';
-    throw err;
-  }
-
   const expires = new Date(row.expires_at).getTime();
   if (expires <= Date.now() + 120000) row = await refreshOauth(row);
   return row;
 }
 
-async function writeAudit({ companyId, actorUserId = null, action, entityType = null, entityId = null, cnpj = '', details = {} }) {
+async function writeAudit({ companyId, actorUserId = null, action, entityType = null, entityId = null, cnpj = '', details = {}, noteId = null }) {
   if (!pool || !companyId || !action) return;
   try {
-    const tech = await pool.query(
-      'SELECT user_id FROM pipedrive_oauth WHERE company_id=$1 AND technical_locked=TRUE',
-      [companyId]
-    );
-    const technicalUserId = tech.rows[0]?.user_id || null;
+    let actorName = null;
+    let actorEmail = null;
+    if (actorUserId) {
+      const oauthUser = await pool.query(
+        'SELECT user_name, user_email FROM pipedrive_oauth_user WHERE company_id=$1 AND user_id=$2',
+        [companyId, Number(actorUserId)]
+      );
+      actorName = oauthUser.rows[0]?.user_name || null;
+      actorEmail = oauthUser.rows[0]?.user_email || null;
+    }
+
     await pool.query(
       `INSERT INTO app_audit_log
-        (company_id, actor_user_id, technical_user_id, action, entity_type, entity_id, cnpj, details, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,NOW())`,
+        (company_id, actor_user_id, technical_user_id, execution_user_id, actor_user_name, actor_user_email, action, entity_type, entity_id, cnpj, details, note_id, created_at)
+       VALUES ($1,$2,NULL,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,NOW())`,
       [
         companyId,
         actorUserId ? Number(actorUserId) : null,
-        technicalUserId ? Number(technicalUserId) : null,
+        actorName,
+        actorEmail,
         clean(action, 80),
         entityType ? clean(entityType, 40) : null,
         entityId ? Number(entityId) : null,
         normalizeCnpj(cnpj) || null,
-        JSON.stringify(details || {})
+        JSON.stringify({ ...(details || {}), oauthMode: 'individual-user' }),
+        noteId ? Number(noteId) : null
       ]
     );
   } catch (error) {
-    // Auditoria não deve impedir o cadastro, mas o erro fica explícito no log do Render.
     console.error('Falha ao gravar auditoria:', error);
   }
 }
@@ -327,6 +381,40 @@ async function pipedriveRequest(companyId, endpoint, options = {}) {
   }
 
   return result.json;
+}
+
+function escapeHtmlServer(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+async function createVisibleAuditNote(companyId, actorUserId, dealId, cnpj, organizationId, personId) {
+  const oauth = await getOauth(companyId);
+  const actorName = oauth.user_name || `Usuário #${actorUserId}`;
+  const when = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  const content = [
+    '<strong>Cadastro realizado via Validação CNPJ</strong>',
+    `Solicitado/executado por: ${escapeHtmlServer(actorName)} (API)`,
+    `CNPJ: ${escapeHtmlServer(formatCnpj(cnpj))}`,
+    `Organização: #${Number(organizationId)}`,
+    `Contato: #${Number(personId)}`,
+    `Negócio: #${Number(dealId)}`,
+    `Data/hora: ${escapeHtmlServer(when)}`
+  ].join('<br>');
+
+  const json = await pipedriveRequest(companyId, '/api/v1/notes', {
+    method: 'POST',
+    body: JSON.stringify({
+      content,
+      deal_id: Number(dealId),
+      pinned_to_deal_flag: 1
+    })
+  });
+  return json?.data || null;
 }
 
 function normalizeFieldName(value) {
@@ -1119,21 +1207,13 @@ function apiError(res, error) {
 
 app.get('/health', async (_req, res) => {
   let database = false;
-  let technicalOauthReady = false;
-  let technicalUserName = null;
+  let authorizedUsers = 0;
   if (pool) {
     try {
       await pool.query('SELECT 1');
       database = true;
-      const tech = await pool.query(
-        `SELECT technical_user_name
-           FROM pipedrive_oauth
-          WHERE technical_locked=TRUE
-          ORDER BY updated_at DESC
-          LIMIT 1`
-      );
-      technicalOauthReady = Boolean(tech.rows.length);
-      technicalUserName = tech.rows[0]?.technical_user_name || null;
+      const users = await pool.query('SELECT COUNT(*)::int AS total FROM pipedrive_oauth_user');
+      authorizedUsers = Number(users.rows[0]?.total || 0);
     } catch (_) {
       database = false;
     }
@@ -1143,10 +1223,10 @@ app.get('/health', async (_req, res) => {
     ok: true,
     database,
     pipedriveConfigured: Boolean(CLIENT_ID && CLIENT_SECRET && CALLBACK_URL),
-    technicalOauthReady,
-    technicalUserName,
+    oauthMode: 'individual-user',
+    authorizedUsers,
     callbackUrl: CALLBACK_URL || null,
-    version: '6.3.1'
+    version: '6.4.0'
   });
 });
 
@@ -1154,7 +1234,7 @@ app.get('/', (_req, res) => {
   res.type('html').send(`<!doctype html>
   <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Pipedrive CNPJ MVP</title><style>body{font-family:Arial,sans-serif;max-width:720px;margin:60px auto;padding:0 24px;color:#252525}code{background:#f3f3f3;padding:3px 6px;border-radius:4px}</style></head>
-  <body><h1>Pipedrive CNPJ MVP v6.3.1</h1><p>Serviço online.</p><p>Janela flutuante: <code>/floating</code></p><p>Modal legado: <code>/modal</code></p><p>OAuth callback: <code>/oauth/callback</code></p><p>Health: <code>/health</code></p></body></html>`);
+  <body><h1>Pipedrive CNPJ MVP v6.4.0</h1><p>Serviço online.</p><p>Janela flutuante: <code>/floating</code></p><p>Modal legado: <code>/modal</code></p><p>OAuth callback: <code>/oauth/callback</code></p><p>Health: <code>/health</code></p></body></html>`);
 });
 
 app.get('/oauth/callback', async (req, res) => {
@@ -1181,56 +1261,27 @@ app.get('/oauth/callback', async (req, res) => {
     const userEmail = normalizeEmail(meJson.data.email || '');
     const expiresAt = new Date(Date.now() + Number(tokens.expires_in || 3600) * 1000);
 
-    const current = await pool.query('SELECT * FROM pipedrive_oauth WHERE company_id=$1', [companyId]);
-    const currentRow = current.rows[0] || null;
-    const isExpectedTechnicalUser = normalizeFieldName(userName) === normalizeFieldName(TECHNICAL_USER_NAME);
-    let technicalAssigned = false;
-    let technicalUserId = currentRow?.technical_locked ? currentRow.user_id : null;
-    let technicalUserName = currentRow?.technical_locked ? currentRow.technical_user_name : null;
+    await pool.query(
+      `INSERT INTO pipedrive_oauth_user
+        (company_id, user_id, user_name, user_email, access_token, refresh_token, api_domain, expires_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())
+       ON CONFLICT (company_id, user_id) DO UPDATE SET
+         user_name = EXCLUDED.user_name,
+         user_email = EXCLUDED.user_email,
+         access_token = EXCLUDED.access_token,
+         refresh_token = EXCLUDED.refresh_token,
+         api_domain = EXCLUDED.api_domain,
+         expires_at = EXCLUDED.expires_at,
+         updated_at = NOW()`,
+      [companyId, userId, userName, userEmail, tokens.access_token, tokens.refresh_token, tokens.api_domain, expiresAt]
+    );
 
-    if (!currentRow?.technical_locked && isExpectedTechnicalUser) {
-      await pool.query(
-        `INSERT INTO pipedrive_oauth
-          (company_id, user_id, access_token, refresh_token, api_domain, expires_at, updated_at, technical_locked, technical_user_name, technical_user_email)
-         VALUES ($1,$2,$3,$4,$5,$6,NOW(),TRUE,$7,$8)
-         ON CONFLICT (company_id) DO UPDATE SET
-           user_id = EXCLUDED.user_id,
-           access_token = EXCLUDED.access_token,
-           refresh_token = EXCLUDED.refresh_token,
-           api_domain = EXCLUDED.api_domain,
-           expires_at = EXCLUDED.expires_at,
-           updated_at = NOW(),
-           technical_locked = TRUE,
-           technical_user_name = EXCLUDED.technical_user_name,
-           technical_user_email = EXCLUDED.technical_user_email`,
-        [companyId, userId, tokens.access_token, tokens.refresh_token, tokens.api_domain, expiresAt, userName, userEmail]
-      );
-      technicalAssigned = true;
-      technicalUserId = userId;
-      technicalUserName = userName;
-    } else if (currentRow?.technical_locked && String(currentRow.user_id) === String(userId)) {
-      await pool.query(
-        `UPDATE pipedrive_oauth
-            SET access_token=$2, refresh_token=$3, api_domain=$4, expires_at=$5, updated_at=NOW(),
-                technical_user_name=$6, technical_user_email=$7
-          WHERE company_id=$1`,
-        [companyId, tokens.access_token, tokens.refresh_token, tokens.api_domain, expiresAt, userName, userEmail]
-      );
-      technicalAssigned = true;
-      technicalUserId = userId;
-      technicalUserName = userName;
-    }
-
-    const technicalText = technicalAssigned
-      ? `A integração da API está fixada em <strong>${technicalUserName || TECHNICAL_USER_NAME}</strong> (usuário #${technicalUserId}).`
-      : currentRow?.technical_locked
-        ? `Sua autorização foi concluída, mas as chamadas da API continuam usando o usuário técnico <strong>${currentRow.technical_user_name || TECHNICAL_USER_NAME}</strong> (usuário #${currentRow.user_id}).`
-        : `Sua autorização foi concluída, porém o OAuth técnico ainda não foi definido. Entre como <strong>${TECHNICAL_USER_NAME}</strong> e autorize o aplicativo uma vez antes de usar o cadastro.`;
+    const authorizationText = `OAuth individual autorizado para <strong>${escapeHtmlServer(userName || `Usuário #${userId}`)}</strong> (usuário #${userId}). As chamadas feitas por este usuário usarão o token dele próprio.`;
 
     res.type('html').send(`<!doctype html>
       <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
       <title>Aplicativo instalado</title><style>body{font-family:Arial,sans-serif;background:#f7f7f7;margin:0;padding:40px}.box{max-width:680px;margin:auto;background:#fff;padding:32px;border-radius:12px;box-shadow:0 3px 16px #0001}.ok{font-size:42px}h1{margin:8px 0 12px}.note{padding:12px;border-radius:8px;background:#eef6ff;margin:16px 0}</style></head>
-      <body><div class="box"><div class="ok">✅</div><h1>Aplicativo autorizado</h1><div class="note">${technicalText}</div><p>O proprietário dos registros continua sendo o usuário que abriu a extensão. O histórico nativo de chamadas da API fica identificado pelo usuário técnico.</p><p>Volte ao Pipedrive e teste <strong>Cadastrar cliente</strong>.</p></div></body></html>`);
+      <body><div class="box"><div class="ok">✅</div><h1>Aplicativo autorizado</h1><div class="note">${authorizationText}</div><p>O proprietário e o autor das chamadas da API passam a ser o próprio usuário que autorizou a aplicação. Cada vendedor deve autorizar com o próprio login.</p><p>Volte ao Pipedrive e teste <strong>Cadastrar cliente</strong>.</p></div></body></html>`);
   } catch (error) {
     console.error('OAuth callback:', error);
     res.status(500).type('html').send(`<h2>Erro no OAuth</h2><pre>${String(error.message || error)}</pre>`);
@@ -1774,13 +1825,23 @@ app.post('/api/create-deal', async (req, res) => {
     await verifyDealCnpjBinding(companyId, organizationId, cnpj);
 
     const result = await createDealIdempotent(companyId, organizationId, personId, req.body, ownerId);
+    const warnings = [];
+    let auditNote = null;
     if (!result.reused) {
-      await writeAudit({ companyId, actorUserId: ownerId, action: 'CREATE_DEAL', entityType: 'deal', entityId: result.deal.id, cnpj, details: { organizationId, personId, ownerId, requestId: clean(req.body.requestId, 80) } });
+      try {
+        auditNote = await createVisibleAuditNote(companyId, ownerId, result.deal.id, cnpj, organizationId, personId);
+      } catch (noteError) {
+        console.error('Falha ao criar anotação de auditoria:', noteError);
+        warnings.push('Negócio criado, mas não foi possível criar a anotação visível de auditoria.');
+      }
+      await writeAudit({ companyId, actorUserId: ownerId, action: 'CREATE_DEAL', entityType: 'deal', entityId: result.deal.id, cnpj, noteId: auditNote?.id || null, details: { organizationId, personId, ownerId, requestId: clean(req.body.requestId, 80) } });
     }
     res.json({
       ok: true,
       deal: { id: Number(result.deal.id), title: result.deal.title },
-      reused: result.reused
+      reused: result.reused,
+      auditNote: auditNote ? { id: Number(auditNote.id) } : null,
+      warnings
     });
   } catch (error) {
     apiError(res, error);
@@ -1849,7 +1910,7 @@ app.post('/api/sync-existing-organization', async (req, res) => {
 initDb()
   .then(() => {
     app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Pipedrive CNPJ MVP v6.3 ouvindo na porta ${PORT}`);
+      console.log(`Pipedrive CNPJ MVP v6.4.0 ouvindo na porta ${PORT}`);
     });
   })
   .catch((error) => {
