@@ -1226,7 +1226,7 @@ app.get('/health', async (_req, res) => {
     oauthMode: 'individual-user',
     authorizedUsers,
     callbackUrl: CALLBACK_URL || null,
-    version: '6.4.0'
+    version: '6.4.1'
   });
 });
 
@@ -1234,7 +1234,7 @@ app.get('/', (_req, res) => {
   res.type('html').send(`<!doctype html>
   <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Pipedrive CNPJ MVP</title><style>body{font-family:Arial,sans-serif;max-width:720px;margin:60px auto;padding:0 24px;color:#252525}code{background:#f3f3f3;padding:3px 6px;border-radius:4px}</style></head>
-  <body><h1>Pipedrive CNPJ MVP v6.4.0</h1><p>Serviço online.</p><p>Janela flutuante: <code>/floating</code></p><p>Modal legado: <code>/modal</code></p><p>OAuth callback: <code>/oauth/callback</code></p><p>Health: <code>/health</code></p></body></html>`);
+  <body><h1>Pipedrive CNPJ MVP v6.4.1</h1><p>Serviço online.</p><p>Janela flutuante: <code>/floating</code></p><p>Modal legado: <code>/modal</code></p><p>OAuth callback: <code>/oauth/callback</code></p><p>Health: <code>/health</code></p></body></html>`);
 });
 
 app.get('/oauth/callback', async (req, res) => {
@@ -1910,7 +1910,7 @@ app.post('/api/sync-existing-organization', async (req, res) => {
 initDb()
   .then(() => {
     app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Pipedrive CNPJ MVP v6.4.0 ouvindo na porta ${PORT}`);
+      console.log(`Pipedrive CNPJ MVP v6.4.1 ouvindo na porta ${PORT}`);
     });
   })
   .catch((error) => {

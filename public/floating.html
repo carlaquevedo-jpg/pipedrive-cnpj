@@ -34,9 +34,9 @@
   <div id="contactCard" class="card">
     <h2>Contato da organização</h2>
     <div id="personListWrap" style="display:none">
-      <div class="hint">Selecione um contato já cadastrado:</div>
+      <div class="hint">Selecione um contato já cadastrado. Ao selecionar, a etapa de criação do negócio será aberta automaticamente.</div>
       <div id="personList"></div>
-      <div class="actions"><button id="btnUsePerson" class="primary" disabled>Usar contato selecionado</button></div>
+      <div class="actions"><button id="btnUsePerson" class="primary" disabled>Continuar para negócio</button></div>
       <div class="divider">ou</div>
     </div>
     <div>
@@ -105,7 +105,7 @@
   </div>
 
   <div id="readyCard" class="card ready">
-    <strong>✓ Cliente pronto</strong>
+    <strong>✓ Cliente pronto para criar o negócio</strong>
     <div class="ready-line"><strong>Organização:</strong> <span id="readyOrg"></span></div>
     <div class="ready-line"><strong>Contato:</strong> <span id="readyPerson"></span></div>
     <div class="section">
@@ -166,7 +166,33 @@
 
   function renderExistingOrganizations(items){existingOrganizations=items||[];el('existingList').innerHTML=existingOrganizations.map(org=>`<label class="choice"><input type="radio" name="org" value="${Number(org.id)}"><div><div class="choice-title">${escapeHtml(org.name||'Organização')}</div><div class="choice-meta">ID #${Number(org.id)}${org.address?' • '+escapeHtml(org.address):''}</div></div></label>`).join('');el('existingList').querySelectorAll('input[name="org"]').forEach(r=>r.addEventListener('change',async ev=>{selectedOrganization=existingOrganizations.find(x=>Number(x.id)===Number(ev.target.value));el('btnSyncOrg').disabled=!selectedOrganization;await loadPersons(selectedOrganization)}));el('existingCard').style.display='block';if(existingOrganizations.length===1){const r=el('existingList').querySelector('input[name="org"]');r.checked=true;selectedOrganization=existingOrganizations[0];el('btnSyncOrg').disabled=false;loadPersons(selectedOrganization)}}
 
-  async function loadPersons(org){el('contactCard').style.display='block';el('personList').innerHTML='';el('personListWrap').style.display='none';setBusy(true,'Carregando contatos...');try{const result=await api('/api/persons-by-organization',{companyId,organizationId:org.id});existingPersons=result.persons||[];if(existingPersons.length){el('personListWrap').style.display='block';el('personList').innerHTML=existingPersons.map(p=>{const meta=[...(p.phones||[]),...(p.emails||[])].slice(0,2).join(' • ');return `<label class="choice"><input type="radio" name="person" value="${Number(p.id)}"><div><div class="choice-title">${escapeHtml(p.name)}</div><div class="choice-meta">ID #${Number(p.id)}${meta?' • '+escapeHtml(meta):''}</div></div></label>`}).join('');el('personList').querySelectorAll('input[name="person"]').forEach(r=>r.addEventListener('change',ev=>{selectedPerson=existingPersons.find(x=>Number(x.id)===Number(ev.target.value));el('btnUsePerson').disabled=!selectedPerson}))}el('existingContactName').focus()}catch(e){setMessage(e.message,'error')}finally{setBusy(false)}}
+  async function loadPersons(org){
+    selectedPerson=null;readyOrganization=null;readyPerson=null;
+    el('readyCard').style.display='none';el('btnUsePerson').disabled=true;
+    el('contactCard').style.display='block';el('personList').innerHTML='';el('personListWrap').style.display='none';
+    setBusy(true,'Carregando contatos...');
+    try{
+      const result=await api('/api/persons-by-organization',{companyId,organizationId:org.id});
+      existingPersons=result.persons||[];
+      if(existingPersons.length){
+        el('personListWrap').style.display='block';
+        el('personList').innerHTML=existingPersons.map(p=>{const meta=[...(p.phones||[]),...(p.emails||[])].slice(0,2).join(' • ');return `<label class="choice"><input type="radio" name="person" value="${Number(p.id)}"><div><div class="choice-title">${escapeHtml(p.name)}</div><div class="choice-meta">ID #${Number(p.id)}${meta?' • '+escapeHtml(meta):''}</div></div></label>`}).join('');
+        el('personList').querySelectorAll('input[name="person"]').forEach(r=>r.addEventListener('change',ev=>{
+          selectedPerson=existingPersons.find(x=>Number(x.id)===Number(ev.target.value));
+          el('btnUsePerson').disabled=!selectedPerson;
+          if(selectedOrganization&&selectedPerson)markReady(selectedOrganization,selectedPerson);
+        }));
+        if(existingPersons.length===1){
+          const only=el('personList').querySelector('input[name="person"]');
+          if(only)only.checked=true;
+          selectedPerson=existingPersons[0];
+          el('btnUsePerson').disabled=false;
+          markReady(org,selectedPerson);
+        }
+      }
+      if(existingPersons.length!==1)el('existingContactName').focus();
+    }catch(e){setMessage(e.message,'error')}finally{setBusy(false)}
+  }
 
   async function syncExisting(){if(!selectedOrganization||!lastCnpj)return;setBusy(true,'Atualizando dados cadastrais...');try{const r=await api('/api/sync-existing-organization',{companyId,organizationId:selectedOrganization.id,cnpj:lastCnpj});fillFromRegistry(r.registry);setMessage('✓ Dados cadastrais atualizados na Organização do Pipedrive.','success')}catch(e){setMessage(e.message,'error')}finally{setBusy(false)}}
 

@@ -1,4 +1,13 @@
-# Pipedrive CNPJ MVP v6.4.0
+# Pipedrive CNPJ MVP v6.4.1
+
+
+## v6.4.1 — Cliente existente segue direto para Negócio
+
+- Ao selecionar um contato já existente, a etapa **Negócio** é aberta automaticamente.
+- Se a Organização tiver apenas um contato, ele é selecionado automaticamente e a etapa **Negócio** já aparece.
+- O botão de apoio agora se chama **Continuar para negócio**.
+- Ao trocar de Organização, o contato/negócio anterior é limpo para evitar vínculo incorreto.
+- Mantém OAuth individual por vendedor, auditoria, CNPJ imutável e proteção contra duplicidade da v6.4.0.
 
 ## v6.4.0 — OAuth individual por vendedor + auditoria visível
 
@@ -66,7 +75,7 @@ Exemplo:
   "pipedriveConfigured": true,
   "oauthMode": "individual-user",
   "authorizedUsers": 2,
-  "version": "6.4.0"
+  "version": "6.4.1"
 }
 ```
 
