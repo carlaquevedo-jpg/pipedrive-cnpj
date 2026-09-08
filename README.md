@@ -1,5 +1,14 @@
-# Pipedrive CNPJ MVP v6.4.1
+# Pipedrive CNPJ MVP v6.4.2
 
+
+## v6.4.2 — Negócio sempre entra no funil Prospecção
+
+- Na criação do Deal, a integração busca dinamicamente o funil chamado **Prospecção** pela API do Pipedrive.
+- Não usa ID fixo de pipeline, evitando diferença entre sandbox e produção.
+- O negócio é criado na **primeira etapa** do funil Prospecção, respeitando a ordem configurada no Pipedrive.
+- O `POST /api/v2/deals` agora envia `pipeline_id` e `stage_id`.
+- Se o funil Prospecção não existir, a integração mostra um erro claro e não cria o Deal em outro funil por engano.
+- Mantém OAuth individual por vendedor, auditoria visível, CNPJ imutável, proteção contra duplicidade e o fluxo de cliente existente da v6.4.1.
 
 ## v6.4.1 — Cliente existente segue direto para Negócio
 
@@ -75,7 +84,7 @@ Exemplo:
   "pipedriveConfigured": true,
   "oauthMode": "individual-user",
   "authorizedUsers": 2,
-  "version": "6.4.1"
+  "version": "6.4.2"
 }
 ```
 

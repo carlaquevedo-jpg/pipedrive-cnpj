@@ -1089,6 +1089,56 @@ async function linkContactsToDeal(companyId, dealId, organizationId, personId = 
   return json.data;
 }
 
+function normalizePipelineName(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+async function resolveProspectingDestination(companyId) {
+  const pipelinesJson = await pipedriveRequest(companyId, '/api/v2/pipelines?limit=500');
+  const pipelines = Array.isArray(pipelinesJson.data) ? pipelinesJson.data : [];
+  const target = normalizePipelineName('Prospecção');
+
+  let pipeline = pipelines.find((item) => normalizePipelineName(item?.name) === target);
+  if (!pipeline) {
+    pipeline = pipelines.find((item) => normalizePipelineName(item?.name).includes('prospec'));
+  }
+
+  if (!pipeline?.id) {
+    const names = pipelines.map((item) => clean(item?.name, 80)).filter(Boolean).slice(0, 20);
+    const err = new Error(`Funil "Prospecção" não encontrado no Pipedrive.${names.length ? ` Funis disponíveis: ${names.join(', ')}.` : ''}`);
+    err.status = 422;
+    err.code = 'PROSPECTING_PIPELINE_NOT_FOUND';
+    throw err;
+  }
+
+  const stagesJson = await pipedriveRequest(
+    companyId,
+    `/api/v2/stages?pipeline_id=${encodeURIComponent(pipeline.id)}&sort_by=order_nr&sort_direction=asc&limit=500`
+  );
+  const stages = Array.isArray(stagesJson.data) ? stagesJson.data : [];
+  const stage = stages
+    .filter((item) => Number(item?.pipeline_id) === Number(pipeline.id))
+    .sort((a, b) => Number(a?.order_nr ?? 999999) - Number(b?.order_nr ?? 999999))[0];
+
+  if (!stage?.id) {
+    const err = new Error(`O funil "${clean(pipeline.name, 100)}" não possui uma etapa disponível para receber o negócio.`);
+    err.status = 422;
+    err.code = 'PROSPECTING_STAGE_NOT_FOUND';
+    throw err;
+  }
+
+  return {
+    pipelineId: Number(pipeline.id),
+    pipelineName: clean(pipeline.name, 100),
+    stageId: Number(stage.id),
+    stageName: clean(stage.name, 100)
+  };
+}
+
 async function createDeal(companyId, organizationId, personId, data = {}, ownerId = null) {
   const title = clean(data.dealTitle || data.title, 255);
   if (!title) {
@@ -1097,9 +1147,13 @@ async function createDeal(companyId, organizationId, personId, data = {}, ownerI
     throw err;
   }
 
+  const destination = await resolveProspectingDestination(companyId);
+
   const body = {
     title,
-    org_id: Number(organizationId)
+    org_id: Number(organizationId),
+    pipeline_id: destination.pipelineId,
+    stage_id: destination.stageId
   };
 
   if (personId) body.person_id = Number(personId);
@@ -1226,7 +1280,7 @@ app.get('/health', async (_req, res) => {
     oauthMode: 'individual-user',
     authorizedUsers,
     callbackUrl: CALLBACK_URL || null,
-    version: '6.4.1'
+    version: '6.4.2'
   });
 });
 
@@ -1234,7 +1288,7 @@ app.get('/', (_req, res) => {
   res.type('html').send(`<!doctype html>
   <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Pipedrive CNPJ MVP</title><style>body{font-family:Arial,sans-serif;max-width:720px;margin:60px auto;padding:0 24px;color:#252525}code{background:#f3f3f3;padding:3px 6px;border-radius:4px}</style></head>
-  <body><h1>Pipedrive CNPJ MVP v6.4.1</h1><p>Serviço online.</p><p>Janela flutuante: <code>/floating</code></p><p>Modal legado: <code>/modal</code></p><p>OAuth callback: <code>/oauth/callback</code></p><p>Health: <code>/health</code></p></body></html>`);
+  <body><h1>Pipedrive CNPJ MVP v6.4.2</h1><p>Serviço online.</p><p>Janela flutuante: <code>/floating</code></p><p>Modal legado: <code>/modal</code></p><p>OAuth callback: <code>/oauth/callback</code></p><p>Health: <code>/health</code></p></body></html>`);
 });
 
 app.get('/oauth/callback', async (req, res) => {
@@ -1910,7 +1964,7 @@ app.post('/api/sync-existing-organization', async (req, res) => {
 initDb()
   .then(() => {
     app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Pipedrive CNPJ MVP v6.4.1 ouvindo na porta ${PORT}`);
+      console.log(`Pipedrive CNPJ MVP v6.4.2 ouvindo na porta ${PORT}`);
     });
   })
   .catch((error) => {
