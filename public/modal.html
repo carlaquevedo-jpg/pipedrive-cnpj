@@ -280,7 +280,15 @@
         </div>
 
         <div class="section">
-          <h2>Contato principal</h2>
+          <h2>Contato (opcional)</h2>
+          <label class="org-choice" style="margin-top:0">
+            <input id="includeContact" type="checkbox" />
+            <div>
+              <div class="org-title">Criar e vincular uma pessoa ao negócio</div>
+              <div class="org-meta">Se não marcar, somente a Organização será vinculada ao negócio já existente.</div>
+            </div>
+          </label>
+          <div id="contactFields" style="display:none; margin-top:12px">
           <div class="hint" style="margin-bottom:12px">
             O telefone cadastral retornado pela consulta é apenas uma sugestão. Informe o contato principal correto.
           </div>
@@ -298,10 +306,11 @@
               <input id="email" type="email" maxlength="255" placeholder="contato@empresa.com.br" autocomplete="email" />
             </div>
           </div>
+          </div>
         </div>
 
         <div class="actions">
-          <button class="primary" id="btnCreate">Criar empresa, contato e vincular</button>
+          <button class="primary" id="btnCreate">Criar empresa e vincular ao negócio</button>
         </div>
       </div>
 
@@ -509,7 +518,7 @@
 
           el('newCard').style.display = 'block';
           el('newCompanyMessage').textContent = '✓ CNPJ não localizado no Pipedrive. Dados cadastrais preenchidos automaticamente.';
-          el('contactName').focus();
+          el('btnCreate').focus();
           return;
         }
 
@@ -554,26 +563,33 @@
         return false;
       }
 
-      const required = [
-        ['legalName', 'Razão Social'],
-        ['contactName', 'Nome do contato'],
-        ['phone', 'Telefone'],
-        ['email', 'E-mail']
-      ];
-
-      for (const [id, label] of required) {
-        if (!el(id).value.trim()) {
-          el(id).focus();
-          setMessage(`Informe: ${label}.`, 'error');
-          return false;
-        }
+      if (!el('legalName').value.trim()) {
+        el('legalName').focus();
+        setMessage('Informe: Razão Social.', 'error');
+        return false;
       }
 
-      const email = el('email').value.trim();
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        el('email').focus();
-        setMessage('Informe um e-mail válido.', 'error');
-        return false;
+      if (el('includeContact').checked) {
+        const required = [
+          ['contactName', 'Nome do contato'],
+          ['phone', 'Telefone'],
+          ['email', 'E-mail']
+        ];
+
+        for (const [id, label] of required) {
+          if (!el(id).value.trim()) {
+            el(id).focus();
+            setMessage(`Informe: ${label}.`, 'error');
+            return false;
+          }
+        }
+
+        const email = el('email').value.trim();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          el('email').focus();
+          setMessage('Informe um e-mail válido.', 'error');
+          return false;
+        }
       }
       return true;
     }
@@ -582,7 +598,7 @@
       if (!lastCnpj) return setMessage('Consulte o CNPJ novamente.', 'error');
       if (!validateNewForm()) return;
 
-      setBusy(true, 'Criando organização, contato e vinculando ao negócio...');
+      setBusy(true, el('includeContact').checked ? 'Criando organização, contato e vinculando ao negócio...' : 'Criando organização e vinculando ao negócio...');
       try {
         const result = await api('/api/create-company-contact-link', {
           companyId,
@@ -595,14 +611,17 @@
           city: el('city').value,
           addressLine: el('addressLine').value,
           organizationEmail: el('orgEmail') ? el('orgEmail').value : '',
+          includeContact: el('includeContact').checked,
           contactName: el('contactName').value,
           phone: el('phone').value,
           email: el('email').value
         });
 
         showDone(
-          'Empresa e contato criados',
-          `${result.organization.name} (#${result.organization.id}) e ${result.person.name} (#${result.person.id}) foram vinculados ao negócio #${result.dealId}.`,
+          result.person ? 'Empresa e contato vinculados' : 'Empresa vinculada',
+          result.person
+            ? `${result.organization.name} (#${result.organization.id}) e ${result.person.name} (#${result.person.id}) foram vinculados ao negócio #${result.dealId}.`
+            : `${result.organization.name} (#${result.organization.id}) foi vinculada ao negócio #${result.dealId} sem contato.`,
           result.warnings || []
         );
       } catch (error) {
@@ -623,6 +642,10 @@
     });
     el('cnpj').addEventListener('keydown', (event) => {
       if (event.key === 'Enter') checkCnpj();
+    });
+    el('includeContact').addEventListener('change', (event) => {
+      el('contactFields').style.display = event.target.checked ? 'block' : 'none';
+      if (event.target.checked) el('contactName').focus();
     });
     el('postalCode').addEventListener('input', (event) => {
       event.target.value = formatCep(event.target.value);

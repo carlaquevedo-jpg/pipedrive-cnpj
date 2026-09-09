@@ -1,5 +1,11 @@
-# Pipedrive CNPJ MVP v6.4.2
+# Pipedrive CNPJ MVP v6.4.3
 
+
+## v6.4.3 — Modal: contato opcional ao vincular empresa ao negócio
+
+No `/modal`, o negócio já existe. A Organização continua obrigatória e a Pessoa passa a ser opcional. Ao cadastrar uma empresa nova pelo modal, o usuário pode marcar “Criar e vincular uma pessoa ao negócio”; se não marcar, somente a Organização é criada e vinculada ao Deal existente.
+
+A criação de negócios na janela flutuante continua no funil Prospecção.
 
 ## v6.4.2 — Negócio sempre entra no funil Prospecção
 
@@ -84,7 +90,7 @@ Exemplo:
   "pipedriveConfigured": true,
   "oauthMode": "individual-user",
   "authorizedUsers": 2,
-  "version": "6.4.2"
+  "version": "6.4.3"
 }
 ```
 

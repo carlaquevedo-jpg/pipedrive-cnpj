@@ -1237,15 +1237,18 @@ async function createDealIdempotent(companyId, organizationId, personId, data = 
 
 function validateNewCompanyPayload(body) {
   const legalName = clean(body.legalName);
+  const includeContact = body.includeContact === true || String(body.includeContact).toLowerCase() === 'true';
   const contactName = clean(body.contactName);
   const phone = clean(body.phone, 100);
   const email = normalizeEmail(body.email);
   const organizationEmail = normalizeEmail(body.organizationEmail);
 
   if (!legalName) return 'Informe a Razão Social.';
-  if (!contactName) return 'Informe o nome do contato principal.';
-  if (!phone) return 'Informe o telefone do contato principal.';
-  if (!isValidEmail(email)) return 'Informe um e-mail válido para o contato principal.';
+  if (includeContact) {
+    if (!contactName) return 'Informe o nome do contato principal.';
+    if (!phone) return 'Informe o telefone do contato principal.';
+    if (!isValidEmail(email)) return 'Informe um e-mail válido para o contato principal.';
+  }
   if (body.organizationEmail && !isValidEmail(organizationEmail)) return 'Informe um e-mail válido para a Organização.';
   return null;
 }
@@ -1280,7 +1283,7 @@ app.get('/health', async (_req, res) => {
     oauthMode: 'individual-user',
     authorizedUsers,
     callbackUrl: CALLBACK_URL || null,
-    version: '6.4.2'
+    version: '6.4.3'
   });
 });
 
@@ -1288,7 +1291,7 @@ app.get('/', (_req, res) => {
   res.type('html').send(`<!doctype html>
   <html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Pipedrive CNPJ MVP</title><style>body{font-family:Arial,sans-serif;max-width:720px;margin:60px auto;padding:0 24px;color:#252525}code{background:#f3f3f3;padding:3px 6px;border-radius:4px}</style></head>
-  <body><h1>Pipedrive CNPJ MVP v6.4.2</h1><p>Serviço online.</p><p>Janela flutuante: <code>/floating</code></p><p>Modal legado: <code>/modal</code></p><p>OAuth callback: <code>/oauth/callback</code></p><p>Health: <code>/health</code></p></body></html>`);
+  <body><h1>Pipedrive CNPJ MVP v6.4.3</h1><p>Serviço online.</p><p>Janela flutuante: <code>/floating</code></p><p>Modal legado: <code>/modal</code></p><p>OAuth callback: <code>/oauth/callback</code></p><p>Health: <code>/health</code></p></body></html>`);
 });
 
 app.get('/oauth/callback', async (req, res) => {
@@ -1564,9 +1567,13 @@ app.post('/api/create-company-contact-link', async (req, res) => {
       [companyId, cnpj, organization.id]
     );
 
-    const person = await createPerson(companyId, organization.id, req.body, ownerId);
-    await writeAudit({ companyId, actorUserId: ownerId, action: 'CREATE_PERSON', entityType: 'person', entityId: person.id, cnpj, details: { organizationId: organization.id, ownerId, legacyFlow: true } });
-    await linkContactsToDeal(companyId, dealId, organization.id, person.id);
+    const includeContact = req.body.includeContact === true || String(req.body.includeContact).toLowerCase() === 'true';
+    let person = null;
+    if (includeContact) {
+      person = await createPerson(companyId, organization.id, req.body, ownerId);
+      await writeAudit({ companyId, actorUserId: ownerId, action: 'CREATE_PERSON', entityType: 'person', entityId: person.id, cnpj, details: { organizationId: organization.id, ownerId, legacyFlow: true } });
+    }
+    await linkContactsToDeal(companyId, dealId, organization.id, person?.id || null);
 
     await pool.query(
       `UPDATE cnpj_registry
@@ -1577,9 +1584,9 @@ app.post('/api/create-company-contact-link', async (req, res) => {
 
     return res.json({
       ok: true,
-      action: 'created_company_contact_and_linked',
+      action: person ? 'created_company_contact_and_linked' : 'created_company_and_linked',
       organization: { id: Number(organization.id), name: organization.name },
-      person: { id: Number(person.id), name: person.name },
+      person: person ? { id: Number(person.id), name: person.name } : null,
       dealId: Number(dealId),
       warnings: createResult.warnings || []
     });
@@ -1803,7 +1810,7 @@ app.post('/api/create-client', async (req, res) => {
       ok: true,
       action: 'created_client_before_deal',
       organization: { id: Number(organization.id), name: organization.name },
-      person: { id: Number(person.id), name: person.name },
+      person: person ? { id: Number(person.id), name: person.name } : null,
       warnings: createResult.warnings || []
     });
   } catch (error) {
@@ -1964,7 +1971,7 @@ app.post('/api/sync-existing-organization', async (req, res) => {
 initDb()
   .then(() => {
     app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Pipedrive CNPJ MVP v6.4.2 ouvindo na porta ${PORT}`);
+      console.log(`Pipedrive CNPJ MVP v6.4.3 ouvindo na porta ${PORT}`);
     });
   })
   .catch((error) => {
